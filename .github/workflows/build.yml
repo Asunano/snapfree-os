@@ -234,6 +234,7 @@ jobs:
       - name: 写入到 image-latest Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           ls -lh dist
@@ -241,6 +242,7 @@ jobs:
             gh release upload image-latest dist/* --clobber
           else
             gh release create image-latest dist/* \
+              --target "$GITHUB_SHA" \
               --title "Ubuntu 26.04 LTS snapfree (latest)" \
               --notes "Ubuntu 26.04 LTS 无 snapd / 无 node / 无 Docker 服务器镜像；由 Actions 自动发布。"
           fi
