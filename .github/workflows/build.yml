@@ -21,17 +21,17 @@ on:
         default: '10G'
         required: true
       with_docker:
-        description: '预装 Docker CE'
+        description: '预装 Docker CE（默认不装，纯净系统）'
         type: boolean
-        default: true
+        default: false
       with_ops:
         description: '预装运维工具（git/vim/htop/tmux）'
         type: boolean
         default: true
       with_firmware:
-        description: '预装 linux-firmware（约 +500MB，物理机建议开）'
+        description: '预装 linux-firmware（默认不装，仅物理机/独服需要）'
         type: boolean
-        default: true
+        default: false
 
   push:
     branches: [main]
