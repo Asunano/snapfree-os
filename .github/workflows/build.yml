@@ -1,0 +1,187 @@
+name: build-qcow2
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Ubuntu 系列代号'
+        default: resolute
+        required: true
+      mirror:
+        description: '构建源（镜像站也可）'
+        default: 'https://archive.ubuntu.com/ubuntu'
+        required: true
+      guest_mirror:
+        description: '写进镜像的 apt 源（装机后使用）'
+        default: 'https://mirrors.aliyun.com/ubuntu'
+        required: true
+      img_size:
+        description: '磁盘虚拟大小'
+        default: '10G'
+        required: true
+      with_docker:
+        description: '预装 Docker CE'
+        type: boolean
+        default: true
+      with_ops:
+        description: '预装运维工具（git/vim/htop/tmux）'
+        type: boolean
+        default: true
+      with_firmware:
+        description: '预装 linux-firmware（约 +500MB，物理机建议开）'
+        type: boolean
+        default: true
+      smoke_test:
+        description: '构建后冒烟启动（TCG，约 5-8 分钟）'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build.yml'   # 改流水线本身时自动跑一次验证
+    tags: ['v*']
+  schedule:
+    - cron: '0 18 1 * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash 语法检查
+        run: |
+          set -euo pipefail
+          for f in build.sh conf.sh hooks/*.sh scripts/*.sh; do
+            bash -n "$f"
+            echo "ok  $f"
+          done
+
+      - name: shellcheck（提示，不阻断）
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning -x build.sh conf.sh hooks/*.sh scripts/*.sh
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 释放磁盘空间
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                       /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h /
+
+      - name: 安装构建依赖
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            mmdebstrap qemu-utils dosfstools parted gdisk e2fsprogs util-linux
+          mmdebstrap --version
+
+      - name: 构建 qcow2
+        shell: bash
+        env:
+          IN_MIRROR: ${{ github.event.inputs.mirror || 'https://archive.ubuntu.com/ubuntu' }}
+          IN_GUEST_MIRROR: ${{ github.event.inputs.guest_mirror || 'https://mirrors.aliyun.com/ubuntu' }}
+          IN_SUITE: ${{ github.event.inputs.suite || 'resolute' }}
+          IN_IMG_SIZE: ${{ github.event.inputs.img_size || '10G' }}
+          IN_DOCKER: ${{ github.event.inputs.with_docker }}
+          IN_OPS: ${{ github.event.inputs.with_ops }}
+          IN_FIRMWARE: ${{ github.event.inputs.with_firmware }}
+        run: |
+          set -euo pipefail
+          bool(){ [ "${1:-true}" = "false" ] && echo 0 || echo 1; }
+          wd=$(bool "$IN_DOCKER"); ops=$(bool "$IN_OPS"); fw=$(bool "$IN_FIRMWARE")
+          echo "mirror=$IN_MIRROR guest=$IN_GUEST_MIRROR suite=$IN_SUITE size=$IN_IMG_SIZE docker=$wd ops=$ops firmware=$fw"
+          sudo env \
+            MIRROR="$IN_MIRROR" \
+            GUEST_MIRROR="$IN_GUEST_MIRROR" \
+            SUITE="$IN_SUITE" \
+            IMG_SIZE="$IN_IMG_SIZE" \
+            WITH_DOCKER="$wd" \
+            WITH_OPS="$ops" \
+            WITH_FIRMWARE="$fw" \
+            bash ./build.sh 2>&1 | tee build.log
+
+      - name: 冒烟启动
+        if: github.event.inputs.smoke_test == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq qemu-system-x86 ovmf genisoimage
+          sudo ./scripts/smoke-test.sh
+
+      - name: 写入任务摘要
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### 构建结果"
+            echo
+            if ls out/*.qcow2 >/dev/null 2>&1; then
+              echo "| 文件 | 大小 | SHA256 |"
+              echo "|---|---|---|"
+              for f in out/*.qcow2; do
+                echo "| $(basename "$f") | $(du -h "$f" | cut -f1) | $(sha256sum "$f" | cut -d' ' -f1) |"
+              done
+            else
+              echo "失败：没有产物，见 build.log"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 qcow2
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: |
+            out/*.qcow2
+            out/*.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: build.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 发布到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
