@@ -32,10 +32,7 @@ on:
         description: '预装 linux-firmware（约 +500MB，物理机建议开）'
         type: boolean
         default: true
-      smoke_test:
-        description: '构建后冒烟启动（TCG，约 5-8 分钟）'
-        type: boolean
-        default: false
+
   push:
     branches: [main]
     paths:
@@ -63,7 +60,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: bash 语法检查
         run: |
@@ -81,10 +78,11 @@ jobs:
           shellcheck -S warning -x build.sh conf.sh hooks/*.sh scripts/*.sh
 
   build:
+    needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 释放磁盘空间
         run: |
@@ -128,14 +126,6 @@ jobs:
             WITH_FIRMWARE="$fw" \
             bash ./build.sh 2>&1 | tee build.log
 
-      - name: 冒烟启动
-        if: github.event.inputs.smoke_test == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y -qq qemu-system-x86 ovmf genisoimage
-          sudo ./scripts/smoke-test.sh
-
       - name: 写入任务摘要
         if: always()
         shell: bash
@@ -174,15 +164,50 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  release:
+  smoke:
     needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 QEMU + OVMF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf
+          ls /usr/share/OVMF/
+
+      - name: 取 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: out
+
+      - name: 冒烟启动（TCG 无 KVM）
+        env:
+          SMOKE_TIMEOUT: '600'
+        run: |
+          set -euo pipefail
+          sudo -E bash ./scripts/smoke-test.sh
+
+      - name: 上传串口日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-log-${{ github.run_number }}
+          path: work/serial.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  release:
+    needs: [build, smoke]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: qcow2-${{ github.run_number }}
           path: dist
-          merge-multiple: true
 
       - name: 发布到 Release
         env:
