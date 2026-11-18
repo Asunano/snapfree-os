@@ -77,7 +77,7 @@ if [ -z "${KEYRING:-}" ]; then
 fi
 
 # ---------- 1. rootfs ----------
-log "1/3 构建最小 rootfs（mmdebstrap，含 nodejs/npm，无 snapd）"
+log "1/3 构建最小 rootfs（mmdebstrap，无 snapd / 无 node / 无 docker）"
 bash "$HERE/scripts/10-rootfs.sh"
 
 # ---------- 2. 磁盘镜像 ----------

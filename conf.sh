@@ -43,10 +43,10 @@ export SSH_PASSWORD_AUTH="${SSH_PASSWORD_AUTH:-no}"
 export GRUB_ID="${GRUB_ID:-ubuntu}"
 
 # ---- 组件开关 ----
-export WITH_DOCKER="${WITH_DOCKER:-1}"           # Docker CE（官方 resolute 源）
+export WITH_DOCKER="${WITH_DOCKER:-0}"           # Docker CE（默认关闭，纯净系统；需要时 WITH_DOCKER=1）
 export WITH_OPS="${WITH_OPS:-1}"                 # 运维工具层（git/vim/htop/tmux...）
 export WITH_QGA="${WITH_QGA:-1}"                 # qemu-guest-agent（虚拟机/云主机用）
-export WITH_FIRMWARE="${WITH_FIRMWARE:-1}"       # linux-firmware（物理机网卡/RAID 卡要它）
+export WITH_FIRMWARE="${WITH_FIRMWARE:-0}"       # linux-firmware（默认不装；物理机/独服才需要）
 export DNS_ADDRS="${DNS_ADDRS-223.5.5.5 119.29.29.29}"   # 留空则沿用 DHCP 下发的 DNS
 
 # ---- 容器构建（本机没有 root/mmdebstrap 时用） ----
