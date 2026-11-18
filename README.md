@@ -1,16 +1,15 @@
 # Ubuntu 26.04 LTS 无 snap 服务器镜像 · 使用文档
 
-一个可直接装到服务器的 qcow2：无 snapd、无桌面/业务软件、`node` 和 `npm` apt 直装、Docker CE 已就位、UEFI 与 BIOS 都能启动。
+一个可直接装到服务器的 qcow2：无 snapd、无桌面/业务软件、**无 node/npm 预设、无 Docker、无 linux-firmware**，只保留服务器启动与基础运维必需的最小集合，业务运行时装完自己 `apt install`。UEFI 与 BIOS 都能启动。
 
 ```
 ubuntu-26.04-server-snapfree-amd64.qcow2
 文件 约 1.4G 容量，虚拟磁盘 10G（稀疏）
 ├─ GPT：p1 bios_grub ｜ p2 ESP vfat 256M ｜ p3 ext4 剩余
-├─ GRUB 2.14：UEFI（ EFI/ubuntu + BOOTX64.EFI 兜底 ）与 BIOS 双启动
+├─ GRUB 2.14：UEFI（ EFI/ubuntu + BOOTX64.EFI 兑底 ）与 BIOS 双启动
 ├─ 内核 7.0.0-43-generic，命令行带 console=ttyS0,115200n8
 ├─ 无 snapd（从未安装，apt Pin -10 永久封杀）
-├─ nodejs 22.22.1 / npm 9.2.0（universe，零第三方源）
-├─ Docker CE 29.10 + compose 插件（官方 resolute 源）
+├─ 无 nodejs / npm / Docker / linux-firmware（按需自己装）
 └─ cloud-init：NoCloud / ConfigDrive / None，首启扩分区
 ```
 
@@ -124,8 +123,9 @@ sudo apt-mirror            # 列可用镜像 + 当前源
 sudo apt-mirror tuna       # 切清华源并 apt update，失败自动回滚
 sudo apt-mirror ustc
 
-# 4) 核对关键版本
-node -v && npm -v && docker version --format '{{.Server.Version}}'
+# 4) 核对系统状态
+apt list --installed 2>/dev/null | wc -l   # 包数量
+sshd -T | head -3                          # sshd 有效配置
 
 # 5) 确认真的没有 snap
 which snap || echo 无 snap        # 应该输出：无 snap
@@ -147,23 +147,21 @@ which snap || echo 无 snap        # 应该输出：无 snap
 | 网络与下载 | **curl**、**wget**、ca-certificates、gnupg、iproute2、iptables、iputils-ping |
 | 账户与区域 | sudo、locales、tzdata、less、logrotate |
 | 远程与初始化 | openssh-server、netplan.io、cloud-init、cloud-guest-utils |
-| 启动链 | grub-common、grub2-common、grub-efi-amd64-bin、grub-pc-bin、initramfs-tools、linux-image-generic、linux-firmware |
-| 运行时 | nodejs 22.22.1、npm 9.2.0 |
-| 容器 | Docker CE 29.10、docker-ce-cli、containerd.io、docker-compose-plugin |
+| 启动链 | grub-common、grub2-common、grub-efi-amd64-bin、grub-pc、grub-pc-bin、initramfs-tools、linux-image-generic |
 | 虚拟化 | qemu-guest-agent（KVM/云主机可用，物理机无害） |
 | 运维工具 | git、vim-tiny、htop、tmux、rsync、jq、unzip、xz-utils、zstd、ethtool、netcat-openbsd |
 
 ### 刻意没装的
 
-nginx、apache2、php、mariadb-server、postgresql、snapd、ubuntu-pro-client、plymouth、wpa_supplicant、无线工具、桌面组件。
+nginx、apache2、php、mariadb-server、postgresql、snapd、ubuntu-pro-client、plymouth、wpa_supplicant、无线工具、桌面组件，以及 **nodejs / npm、Docker CE、linux-firmware**。
 
-`packages.remove` 里还有一份黑名单：就算被某个依赖意外拖进来，构建期也会 `purge --auto-remove` 掉，并断言 `snapd` 与 `/snap` 不存在。业务软件请自己装：`sudo apt install nginx`。
+`packages.remove` 里还有一份黑名单：就算被某个依赖意外拖进来，构建期也会 `purge --auto-remove` 掉，并断言 `snapd` 与 `/snap` 不存在。业务软件与运行时请自己装：`sudo apt install nginx nodejs npm`（26.04 源内就是 node 22.x），Docker 按官方文档加 `download.docker.com` 源。
 
 ### 服务状态
 
 | 已启用 | 已禁用 |
 |---|---|
-| `ssh`、`docker`、`containerd`、`qemu-guest-agent` | `apt-daily.timer`、`apt-daily-upgrade.timer`、`motd-news.timer` |
+| `ssh`、`qemu-guest-agent` | `apt-daily.timer`、`apt-daily-upgrade.timer`、`motd-news.timer` |
 | `fstrim.timer`、`logrotate.timer`、`systemd-timesyncd` | 默认目标 `/multi-user.target`（无图形） |
 
 `systemd-resolved` **没有装**（省一个移动靶），`/etc/resolv.conf` 是静态文件，DNS 在 netplan 里写死。
@@ -174,7 +172,7 @@ nginx、apache2、php、mariadb-server、postgresql、snapd、ubuntu-pro-client�
 
 | 文件 | 作用 |
 |---|---|
-| `/etc/sysctl.d/99-server.conf` | BBR + fq 拥塞控制、`somaxconn=4096`、`tcp_max_syn_backlog=8192`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
+| `/etc/sysctl.d/99-server.conf` | BBR + fq 擁塞控制、`somaxconn=4096`、`tcp_max_syn_backlog=8192`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
 | `/etc/modules-load.d/99-server.conf` | 开机加载 `tcp_bbr`（否则 sysctl 里的 bbr 不生效） |
 | `/etc/security/limits.d/99-server.conf` | `nofile 65535`、`nproc 32768` |
 | `/etc/systemd/journald.conf.d/99-server.conf` | 日志上限 200M / 单文件 50M / 保留 30 天 |
@@ -199,9 +197,9 @@ nginx、apache2、php、mariadb-server、postgresql、snapd、ubuntu-pro-client�
 | 根分区还是 10G | `sudo growpart /dev/sdX 3 && sudo resize2fs /dev/sdXp3`，物理机还需 `sgdisk -e` |
 | 网卡不是 eth0 | 本镜像只匹配 `e*`；改成 `match: name: en*` 或其他，改完 `netplan apply` |
 | `apt install nginx` 装的东西很少 | 全局关了 recommends，`--install-recommends` 显式开 |
-| 老的容器运行时起不来 | systemd 259 已移除 cgroup v1，换 Docker 2x 或宿主机兼容层 |
-| 想升级 npm | `sudo npm i -g npm@latest`，与 apt 源无关 |
-| Docker 数据盘想换位置 | 写 `/etc/docker/daemon.json` 的 `data-root` 后 `systemctl restart docker` |
+| 想要 node / npm | 镜像不带，直接 `sudo apt install nodejs npm`（26.04 源内是 22.x，零第三方源） |
+| 想要 Docker | 自己加官方源：`download.docker.com/linux/ubuntu resolute`；注意 systemd 259 无 cgroup v1，用新版 Docker |
+| 想要容器又不想装守护进程 | `sudo apt install podman`，兼容 docker 命令行的大部分用法 |
 
 ---
 
@@ -221,9 +219,9 @@ git tag v26.04-20261218 && git push origin v26.04-20261218
 | `mirror` | 官方源 | 构建用源（runner 在海外） |
 | `guest_mirror` | 阿里云 | 写进镜像的源 |
 | `img_size` | `10G` | 虚拟磁盘大小 |
-| `with_docker` | `true` | 预装 Docker CE |
+| `with_docker` | `false` | 预装 Docker CE（默认不装） |
 | `with_ops` | `true` | 运维工具层 |
-| `with_firmware` | `true` | `linux-firmware`，物理机需要 |
+| `with_firmware` | `false` | `linux-firmware`，仅物理机/独服需要 |
 
 改 `build.sh` / `conf.sh` / `scripts/**` / `hooks/**` / `packages*` / `files/**` 会自动触发一次构建；改 README 不会。
 
@@ -237,10 +235,10 @@ sudo ./build.sh               # 或 Ubuntu 26.04 上以 root 直接跑
 常用覆盖：
 
 ```bash
-WITH_DOCKER=false ./build.sh   # 无 Docker，省约 500MB
+WITH_DOCKER=true ./build.sh    # 需要 Docker 时才装（默认不装）
 WITH_OPS=false ./build.sh      # 不带 git/vim/htop
 WITH_QGA=false ./build.sh      # 物理机不要 guest agent
-WITH_FIRMWARE=false ./build.sh # 省 500MB
+WITH_FIRMWARE=true ./build.sh  # 物理机/独服才需要（默认不装）
 USER_NAME=ops USER_PASSWORD=xx SSH_PASSWORD_AUTH=yes ./build.sh
 DNS_ADDRS= ./build.sh          # DNS 跟 DHCP 走
 ```
@@ -248,7 +246,7 @@ DNS_ADDRS= ./build.sh          # DNS 跟 DHCP 走
 ### 已知限制
 
 1. 不支持 Secure Boot（GRUB 未签名）。
-2. npm 是 Ubuntu 打包的 9.2.0，要新版自己 `npm i -g npm@latest`。
+2. 镜像不含 nodejs/npm/Docker/linux-firmware，装完自己 `apt install` 或加官方源。
 3. systemd 259 无 cgroup v1，极老运行时起不来。
 4. arm64 未适配：需改 GRUB target 为 `arm64-efi` 并去掩 `grub-pc-bin`。
 5. 默认拒绝密码登录，忘了挂 seed 就只能重建或改盘。
@@ -263,7 +261,7 @@ DNS_ADDRS= ./build.sh          # DNS 跟 DHCP 走
 ├─ packages-ops.list             运维工具层
 ├─ packages.remove               黑名单，误入即 purge
 ├─ files/                        拷进镜像的静态配置
-├─ hooks/10-prepare.sh           源 / 用户 / Docker / 断言无 snapd
+├─ hooks/10-prepare.sh           源 / 用户 / 可选 Docker / 断言无 snapd
 ├─ hooks/99-cleanup.sh           清缓存、主机标识、语言包
 └─ scripts/                      rootfs、组盘、校验、keyring、seed、冒烟、试启动
 ```
