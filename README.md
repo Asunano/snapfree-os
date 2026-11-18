@@ -1,205 +1,271 @@
-# ubuntu-snapfree-image
+# Ubuntu 26.04 LTS 无 snap 服务器镜像 · 使用文档
 
-用 GitHub Actions 从 Ubuntu 官方源构建**不含 snap 的服务器 qcow2**。
-push 即跑 lint → build → smoke（TCG 真启动到 login），打 tag 自动发 Release。
+一个可直接装到服务器的 qcow2：无 snapd、无桌面/业务软件、`node` 和 `npm` apt 直装、Docker CE 已就位、UEFI 与 BIOS 都能启动。
 
 ```
-ubuntu-26.04-server-snapfree-amd64.qcow2   （约 1.4G）
-├─ GPT：bios_grub + ESP(256M) + ext4 root
-├─ GRUB 2.14：UEFI(EFI/ubuntu + BOOTX64.EFI 兜底) 与 BIOS 双启动
+ubuntu-26.04-server-snapfree-amd64.qcow2
+文件 约 1.4G 容量，虚拟磁盘 10G（稀疏）
+├─ GPT：p1 bios_grub ｜ p2 ESP vfat 256M ｜ p3 ext4 剩余
+├─ GRUB 2.14：UEFI（ EFI/ubuntu + BOOTX64.EFI 兜底 ）与 BIOS 双启动
+├─ 内核 7.0.0-43-generic，命令行带 console=ttyS0,115200n8
 ├─ 无 snapd（从未安装，apt Pin -10 永久封杀）
-├─ nodejs 22.22.1 + npm 9.2.0，apt 直装，零第三方 JS 源
-├─ Docker CE 29.10（download.docker.com 的 resolute 源）
-└─ cloud-init：[NoCloud, ConfigDrive, None]，首启自动扩分区
+├─ nodejs 22.22.1 / npm 9.2.0（universe，零第三方源）
+├─ Docker CE 29.10 + compose 插件（官方 resolute 源）
+└─ cloud-init：NoCloud / ConfigDrive / None，首启扩分区
 ```
 
-## 为什么用 26.04 而不是 24.04
+---
 
-| | 24.04 noble | 26.04 resolute |
-|---|---|---|
-| `nodejs` | 18.19.1（上游 Node 18 已于 2025-04 EOL） | **22.22.1** |
-| `npm` | 9.2.0 | 9.2.0（独立包） |
-| 不加第三方源就拿到现代 Node | 否 | 是 |
-| 标准支持 | 2029-04 | 2031-04 |
-| 内核 | 6.8 | 7.0.0-43（实测日志） |
+## 1. 账号与登录（先看这段）
 
-24.04 上要 node 22 只能挂 NodeSource，等于又把额外加源背回来了。
+| 账号 | 密码 | sudo | 默认能否登录 |
+|---|---|---|---|
+| `ubuntu` | **空（锁定）** | 免密 | 否，只认 SSH 密钥 |
+| `root` | **空（锁定）** | — | 否，`PermitRootLogin prohibit-password` 且无 authorized_keys |
 
-## 怎么触发
+**结论：镜像里没有任何可用密码，也没有任何默认口令。** 没做下面两步之一，你既登不进 SSH，也登不进串口控制台（控制台会停在 login 提示没人应答）。这是故意的：镜像一旦被扫到端口就不该有弱口令。
 
-| 方式 | 何时 | 做什么 |
-|---|---|---|
-| Actions 页 `Run workflow` | 手动 | 可填参数，见下表 |
-| push 到 main | 改 `.github/workflows/build.yml` / `build.sh` / `conf.sh` / `scripts/**` / `hooks/**` / `packages*.list` / `files/**` | 自动跑一整条流水线 |
-| push tag `v*` | 发布 | 构建 + 启动验证 + 传到 Release |
-| schedule | 每月 1 日 18:00 UTC | 定时重建，吃掉最新安全补丁 |
-
-改 README / LICENSE 这类不影响镜像的文件**不会**触发构建。
-
-`Run workflow` 参数：
-
-| 输入 | 默认 | 说明 |
-|---|---|---|
-| `suite` | `resolute` | Ubuntu 代号 |
-| `mirror` | `https://archive.ubuntu.com/ubuntu` | **构建**用源（runner 在海外，走官方最快） |
-| `guest_mirror` | `https://mirrors.aliyun.com/ubuntu` | **写进镜像**的源（装机在国内直连） |
-| `img_size` | `10G` | 磁盘虚拟大小（稀疏，实际文件约 1.4G） |
-| `with_docker` | `true` | 预装 Docker CE |
-| `with_ops` | `true` | 运维工具层（git/vim/htop/tmux/rsync/jq…） |
-| `with_firmware` | `true` | `linux-firmware`，物理机网卡/RAID 卡需要，约 +500MB |
-
-## 流水线
-
-| job | 时间 | 做什么 |
-|---|---|---|
-| `lint` | ~10s | 全部脚本 `bash -n`；shellcheck 只提示不阻断 |
-| `build` | ~9min | mmdebstrap 出 rootfs → 组盘 → GRUB 双启动 → qcow2 |
-| `smoke` | ~1.5min | 下载产物，TCG 无 KVM 启动，串口必须出现 `Cloud-init v` 或 `login:` |
-| `release` | 仅 tag | 把 qcow2 + sha256 传到 Release |
-
-产物（Artifacts，保留 14/7 天）：`qcow2-<run号>`、`build-log-<run号>`、`serial-log-<run号>`（冒烟串口全文，排障必备）。
-
-> runner 是 `ubuntu-24.04`，其 keyring 只有 noble 的密钥。`build.sh` 会自动探测宿主代号 ≠ 目标代号，从目标发行版的 `Packages.gz` 里取 `ubuntu-keyring` 并传给 `mmdebstrap --keyring`，不需要手工干预。
-
-## 本地构建
+### 方式 A：cloud-init 注入公钥（推荐）
 
 ```bash
-# 有 docker 就行（自动进 ubuntu:26.04 特权容器）
-./build.sh
+# 1) 生成 seed 盘（在你自己的电脑上，需要 genisoimage / xorriso）
+./scripts/make-seed.sh ~/.ssh/id_ed25519.pub      # 产出 out/seed.iso
 
-# 或 Ubuntu 26.04 上以 root 直接跑
-sudo apt install mmdebstrap qemu-utils dosfstools parted gdisk
-sudo ./build.sh
+# 2) 把 seed.iso 作为第二块盘挂给虚拟机
+#    KVM：   -drive file=out/seed.iso,if=virtio,format=raw,readonly=on
+#    Proxmox：上传为 ISO，挂到 CD/DVD
+```
+
+首次开机会自动创建用户 `ubuntu`、写入你的公钥、主机名 `ubuntu-server`，然后你就可以：
+
+```bash
+ssh ubuntu@<IP>
+```
+
+### 方式 B：构建时直接烧密码（内网/临时用）
+
+```bash
+USER_PASSWORD='你的密码' SSH_PASSWORD_AUTH=yes ./build.sh
+```
+
+这会把密码烧进镜像并打开 SSH 密码登录。**不要用它做对外暴露的机器。**
+
+### 方式 C：构建时换用户名
+
+```bash
+USER_NAME=ops ./build.sh        # 默认 ubuntu
+```
+
+用户名、密码、是否允许密码登录，三件事都只在构建时决定，装好之后要改就得自己进系统改（`passwd` / `/etc/ssh/sshd_config.d/10-image.conf`）。
+
+### 怎么知道自己该用哪种
+
+| 场景 | 选 |
+|---|---|
+| 云主机 / KVM / 内网服务器 | A（seed 注入公钥） |
+| 物理机装完要临时进去看看 | B（烧密码，装完改回密钥） |
+| 批量同构部署 | A + 自动化平台下发 cloud-init |
+
+---
+
+## 2. 装到机器上
+
+### 物理机（U 盘或直写硬盘）
+
+```bash
+# 整盘写入
+dd if=ubuntu-26.04-server-snapfree-amd64.qcow2 of=/dev/sdX bs=4M status=progress conv=fsync
+
+# 修复备份 GPT + 把根分区撑满整盘
+sgdisk -e /dev/sdX
+growpart /dev/sdX 3 && resize2fs /dev/sdXp3
+```
+
+BIOS 里要**关掉 Secure Boot**（GRUB 未签名）。
+
+### KVM / libvirt / Proxmox
+
+```bash
+virt-install --name u2604 --memory 2048 --vcpus 2 --import \
+  --disk ubuntu-26.04-server-snapfree-amd64.qcow2 \
+  --disk out/seed.iso,device=cdrom \
+  --os-variant ubuntu26.04 --network bridge=br0
+```
+
+Proxmox：上传 qcow2 → `qm importdisk <vmid> 镜像.qcow2 local-lvm` → 挂 seed.iso 到光驱 → 开机。
+
+### VMware / VirtualBox
+
+```bash
+qemu-img convert -f qcow2 -O vmdk ubuntu-26.04-server-snapfree-amd64.qcow2 disk.vmdk
+```
+
+### 云主机
+
+大多数平台只收自己的镜像格式（qcow2/raw 常见）。导入后同样靠 cloud-init（NoCloud / ConfigDrive）下发公钥，不要指望控制台的密码。
+
+---
+
+## 3. 首次开机做什么
+
+```bash
+ssh ubuntu@<IP>          # 或者用平台控制台（已注入公钥时也要走密钥）
+
+# 1) 看盘有没有自动扩到全盘（cloud-init 的 growpart 会跑一遍）
+df -h /                  # 不是 10G？手动来一遍：
+                         # sudo growpart /dev/vda 3 && sudo resize2fs /dev/vda3
+
+# 2) 看网
+ip -4 a                  # 网卡名固定 eth0（内核参数 net.ifnames=0）
+ping -c1 223.5.5.5
+
+# 3) 换源（镜像里默认写的是阿里云，海外或不通就换）
+sudo apt-mirror            # 列可用镜像 + 当前源
+sudo apt-mirror tuna       # 切清华源并 apt update，失败自动回滚
+sudo apt-mirror ustc
+
+# 4) 核对关键版本
+node -v && npm -v && docker version --format '{{.Server.Version}}'
+
+# 5) 确认真的没有 snap
+which snap || echo 无 snap        # 应该输出：无 snap
+```
+
+改主机名：`sudo hostnamectl set-hostname your-host`（记得同步 `/etc/hosts` 里的 `127.0.1.1` 行）。
+
+时区已经是 `Asia/Shanghai`，不用再改。
+
+---
+
+## 4. 镜像里有什么
+
+### 装了的
+
+| 类别 | 包 |
+|---|---|
+| 启动与基础 | systemd、udev、dbus、kmod、util-linux、e2fsprogs、dosfstools |
+| 网络与下载 | **curl**、**wget**、ca-certificates、gnupg、iproute2、iptables、iputils-ping |
+| 账户与区域 | sudo、locales、tzdata、less、logrotate |
+| 远程与初始化 | openssh-server、netplan.io、cloud-init、cloud-guest-utils |
+| 启动链 | grub-common、grub2-common、grub-efi-amd64-bin、grub-pc-bin、initramfs-tools、linux-image-generic、linux-firmware |
+| 运行时 | nodejs 22.22.1、npm 9.2.0 |
+| 容器 | Docker CE 29.10、docker-ce-cli、containerd.io、docker-compose-plugin |
+| 虚拟化 | qemu-guest-agent（KVM/云主机可用，物理机无害） |
+| 运维工具 | git、vim-tiny、htop、tmux、rsync、jq、unzip、xz-utils、zstd、ethtool、netcat-openbsd |
+
+### 刻意没装的
+
+nginx、apache2、php、mariadb-server、postgresql、snapd、ubuntu-pro-client、plymouth、wpa_supplicant、无线工具、桌面组件。
+
+`packages.remove` 里还有一份黑名单：就算被某个依赖意外拖进来，构建期也会 `purge --auto-remove` 掉，并断言 `snapd` 与 `/snap` 不存在。业务软件请自己装：`sudo apt install nginx`。
+
+### 服务状态
+
+| 已启用 | 已禁用 |
+|---|---|
+| `ssh`、`docker`、`containerd`、`qemu-guest-agent` | `apt-daily.timer`、`apt-daily-upgrade.timer`、`motd-news.timer` |
+| `fstrim.timer`、`logrotate.timer`、`systemd-timesyncd` | 默认目标 `/multi-user.target`（无图形） |
+
+`systemd-resolved` **没有装**（省一个移动靶），`/etc/resolv.conf` 是静态文件，DNS 在 netplan 里写死。
+
+---
+
+## 5. 已经做过的调优（知道在哪，方便改）
+
+| 文件 | 作用 |
+|---|---|
+| `/etc/sysctl.d/99-server.conf` | BBR + fq 拥塞控制、`somaxconn=4096`、`tcp_max_syn_backlog=8192`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
+| `/etc/modules-load.d/99-server.conf` | 开机加载 `tcp_bbr`（否则 sysctl 里的 bbr 不生效） |
+| `/etc/security/limits.d/99-server.conf` | `nofile 65535`、`nproc 32768` |
+| `/etc/systemd/journald.conf.d/99-server.conf` | 日志上限 200M / 单文件 50M / 保留 30 天 |
+| `/etc/apt/apt.conf.d/99-server` | 全局 `Install-Recommends=false`、`Install-Suggests=false`、`Acquire::Languages=none` |
+| `/etc/apt/apt.conf.d/20auto-upgrades` | 全 0，禁止后台自动升级 |
+| `/usr/local/bin/apt-mirror` | 一键换源并回滚 |
+| `/etc/netplan/10-image.yaml` | 所有 `e*` 网口 DHCP，DNS `223.5.5.5 / 119.29.29.29` |
+
+不想要哪条就删对应文件后 `sudo sysctl --system` / `sudo netplan apply`。
+
+---
+
+## 6. 常见问题
+
+| 现象 | 原因 / 处置 |
+|---|---|
+| `Permission denied (publickey)` | 没挂 seed，也没烧密码。重启挂 seed.iso；不行就重建镜像带 `USER_PASSWORD` |
+| 串口黑屏或乱码 | 控制台要 `115200`；本镜像已配 `console=ttyS0,115200n8` 和 `GRUB_TERMINAL=console serial` |
+| 开不了机 / 安全启动报错 | BIOS 关 Secure Boot，GRUB 未签名 |
+| 开机卡在 GRUB 命令行 | 磁盘未按 GPT 写入，或 dd 写到了分区而非整盘 |
+| `apt update` 403 / 超时 | `sudo apt-mirror tuna` 换个源；阿里云对部分出口段有拦截 |
+| 根分区还是 10G | `sudo growpart /dev/sdX 3 && sudo resize2fs /dev/sdXp3`，物理机还需 `sgdisk -e` |
+| 网卡不是 eth0 | 本镜像只匹配 `e*`；改成 `match: name: en*` 或其他，改完 `netplan apply` |
+| `apt install nginx` 装的东西很少 | 全局关了 recommends，`--install-recommends` 显式开 |
+| 老的容器运行时起不来 | systemd 259 已移除 cgroup v1，换 Docker 2x 或宿主机兼容层 |
+| 想升级 npm | `sudo npm i -g npm@latest`，与 apt 源无关 |
+| Docker 数据盘想换位置 | 写 `/etc/docker/daemon.json` 的 `data-root` 后 `systemctl restart docker` |
+
+---
+
+## 7. 附录：自己重新构建
+
+### 用 GitHub Actions（无需本地环境）
+
+```bash
+git tag v26.04-20261218 && git push origin v26.04-20261218
+```
+
+跑完 `lint → build → smoke → release`，Release 里直接下 qcow2。也可以在 Actions 页点 `Run workflow` 改参数。
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `suite` | `resolute` | Ubuntu 代号 |
+| `mirror` | 官方源 | 构建用源（runner 在海外） |
+| `guest_mirror` | 阿里云 | 写进镜像的源 |
+| `img_size` | `10G` | 虚拟磁盘大小 |
+| `with_docker` | `true` | 预装 Docker CE |
+| `with_ops` | `true` | 运维工具层 |
+| `with_firmware` | `true` | `linux-firmware`，物理机需要 |
+
+改 `build.sh` / `conf.sh` / `scripts/**` / `hooks/**` / `packages*` / `files/**` 会自动触发一次构建；改 README 不会。
+
+### 本地构建
+
+```bash
+./build.sh                     # 有 docker 就行（自动进 ubuntu:26.04 特权容器）
+sudo ./build.sh               # 或 Ubuntu 26.04 上以 root 直接跑
 ```
 
 常用覆盖：
 
 ```bash
-WITH_DOCKER=false ./build.sh          # 去掉 Docker，省约 500MB
-WITH_OPS=false ./build.sh             # 不带 git/vim/htop/tmux
-WITH_QGA=false ./build.sh             # 物理机不要 qemu-guest-agent
-WITH_FIRMWARE=false ./build.sh        # 省 500MB，网卡缺固件时再开
-IMG_SIZE=20G ./build.sh
-MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ubuntu ./build.sh
-GUEST_MIRROR=https://mirrors.ustc.edu.cn/ubuntu ./build.sh
-DNS_ADDRS= ./build.sh                 # 不留静态 DNS，沿用 DHCP
+WITH_DOCKER=false ./build.sh   # 无 Docker，省约 500MB
+WITH_OPS=false ./build.sh      # 不带 git/vim/htop
+WITH_QGA=false ./build.sh      # 物理机不要 guest agent
+WITH_FIRMWARE=false ./build.sh # 省 500MB
+USER_NAME=ops USER_PASSWORD=xx SSH_PASSWORD_AUTH=yes ./build.sh
+DNS_ADDRS= ./build.sh          # DNS 跟 DHCP 走
 ```
 
-`make build / seed / boot / smoke / lint / clean` 也可用。
+### 已知限制
 
-## 装到机器上
+1. 不支持 Secure Boot（GRUB 未签名）。
+2. npm 是 Ubuntu 打包的 9.2.0，要新版自己 `npm i -g npm@latest`。
+3. systemd 259 无 cgroup v1，极老运行时起不来。
+4. arm64 未适配：需改 GRUB target 为 `arm64-efi` 并去掩 `grub-pc-bin`。
+5. 默认拒绝密码登录，忘了挂 seed 就只能重建或改盘。
 
-```bash
-# 物理机整盘写
-dd if=ubuntu-26.04-server-snapfree-amd64.qcow2 of=/dev/sdX bs=4M status=progress conv=fsync
-
-# 修复备份 GPT 并扩容
-sgdisk -e /dev/sdX
-growpart /dev/sdX 3 && resize2fs /dev/sdXp3
-
-# KVM / Proxmox / libvirt
-virt-install --name u2604 --memory 2048 --vcpus 2 --import \
-  --disk ubuntu-26.04-server-snapfree-amd64.qcow2 --os-variant ubuntu26.04
-```
-
-登录方式（二选一）：
-
-```bash
-# A. cloud-init 注入公钥（推荐）
-./scripts/make-seed.sh ~/.ssh/id_ed25519.pub     # 生成 seed.iso，挂成第二块盘
-
-# B. 构建时直接带密码（内网/临时用）
-USER_PASSWORD=xxx SSH_PASSWORD_AUTH=yes ./build.sh
-```
-
-镜像里 root 锁定、SSH 默认只认密钥，**没有 seed 也没有密码时是登不进去的**。
-
-## 镜像规格
-
-| 项 | 值 |
-|---|---|
-| 基座 | `mmdebstrap --variant=apt`，main+universe，**不含 ubuntu-minimal/ubuntu-server 等种子包** |
-| 分区 | p1 `bios_grub` 1–2MiB ／ p2 ESP vfat 2–258MiB ／ p3 ext4 剩余 |
-| 内核参数 | `net.ifnames=0 biosdevname=0`（网卡固定 eth0）+ 串口 `ttyS0,115200n8` |
-| 网络 | netplan：所有 `e*` 网口 DHCP，DNS 固定 `223.5.5.5 / 119.29.29.29`（`DNS_ADDRS=` 可关） |
-| 预装 | `curl`、`wget`、`ca-certificates`、`nodejs/npm`、`openssh-server`、`cloud-init`、Docker CE、qemu-guest-agent |
-| 不装 | nginx、apache2、php、mariadb/postgresql、snapd、ubuntu-pro-client、plymouth、wpa_supplicant |
-| 已清 | machine-id、ssh host key、apt 缓存/日志、changelog、非中英文语言包 |
-
-## 服务器向精简与调优
-
-**源**
-
-- 构建源 `MIRROR` 与镜像内源 `GUEST_MIRROR` 分离。
-- 镜像内置 `/usr/local/bin/apt-mirror`，一条命令换源并自动回滚：
-
-```bash
-sudo apt-mirror                 # 列可用镜像 + 当前源
-sudo apt-mirror tuna            # 切清华源并 apt update
-sudo apt-mirror https://xxx/ubuntu
-```
-
-- `/etc/apt/apt.conf.d/99-server`：全局 `Install-Recommends=false`、`Install-Suggests=false`、`Acquire::Languages=none`、超时 20s。
-- `/etc/apt/apt.conf.d/20auto-upgrades` 全 0，并关掉 `apt-daily.timer` / `apt-daily-upgrade.timer` / `motd-news.timer`。
-
-**清理**
-
-- `packages.remove` 黑名单（nginx/apache/php/mariadb/postgresql/snapd/plymouth/wpasupplicant…）：被依赖意外拖进来时，构建期自动 `purge --auto-remove`，并断言 snapd 不存在、`/snap` 不存在。
-- 收尾删 `changelog`、`/usr/share/locale` 里除 `en*/zh*` 之外的全部目录，保留 `copyright` 满足许可证要求。
-
-**调优**
-
-| 文件 | 内容 |
-|---|---|
-| `/etc/sysctl.d/99-server.conf` | BBR + fq、`somaxconn=4096`、`tcp_max_syn_backlog=8192`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
-| `/etc/modules-load.d/99-server.conf` | `tcp_bbr`（开机加载，否则 sysctl 里的 bbr 不生效） |
-| `/etc/systemd/journald.conf.d/99-server.conf` | 日志上限 200M，保留 30 天 |
-| `/etc/security/limits.d/99-server.conf` | `nofile 65535`、`nproc 32768` |
-| `motd` | 删掉 help-text / motd-news / cloudimg 广告脚本 |
-
-`fstrim.timer`、`logrotate.timer`、`systemd-timesyncd` 已启用；`multi-user.target` 为默认目标。
-
-## 已知限制
-
-1. **不支持 Secure Boot**：GRUB 未签名，BIOS 里要关掉。
-2. **npm 是 9.2.0**（Ubuntu 打包版本）；要新版 `sudo npm i -g npm@latest`，不涉及 apt 源。
-3. **systemd 259 已移除 cgroup v1**：极老的服务/容器运行时会起不来，Docker CE 29.x 正常。
-4. **`linux-firmware` 默认装**；`with_firmware=false` 可省约 500MB，但部分 Intel/Realtek 网卡会缺固件。
-5. **全局关闭 recommends**：后续 `apt install nginx` 只装必需包，要推荐包时显式 `--install-recommends`。
-6. **arm64 未适配**：需改 `scripts/20-image.sh` 的 GRUB target 为 `arm64-efi`，并从 `packages.list` 去掉 `grub-pc-bin`。
-
-## 仓库结构
+### 仓库结构
 
 ```
-.
 ├─ .github/workflows/build.yml   lint / build / smoke / release
 ├─ build.sh                      入口（root 直跑或 docker 容器）
-├─ conf.sh                       全部参数（workflow 输入映射到这里）
-├─ packages.list                 核心包清单（无种子包，故无 snapd）
-├─ packages-ops.list             运维工具层（WITH_OPS=0 关闭）
+├─ conf.sh                       全部参数
+├─ packages.list                 核心包（无种子包，故无 snapd）
+├─ packages-ops.list             运维工具层
 ├─ packages.remove               黑名单，误入即 purge
-├─ files/                        直接拷进镜像的静态文件
-│  ├─ etc/apt/apt.conf.d/{20auto-upgrades,99-server}
-│  ├─ etc/apt/preferences.d/nosnap.pref
-│  ├─ etc/cloud/cloud.cfg.d/99-image.cfg
-│  ├─ etc/default/grub
-│  ├─ etc/security/limits.d/99-server.conf
-│  ├─ etc/sysctl.d/99-server.conf
-│  ├─ etc/systemd/journald.conf.d/99-server.conf
-│  ├─ etc/modules-load.d/99-server.conf
-│  ├─ etc/netplan/10-image.yaml
-│  ├─ etc/ssh/sshd_config.d/10-image.conf
-│  └─ usr/local/bin/apt-mirror   镜像内换源工具
-├─ hooks/10-prepare.sh           源/时区/用户/Docker/黑名单/断言无 snapd
-├─ hooks/99-cleanup.sh           清缓存、主机标识、changelog、多余语言包
-└─ scripts/
-   ├─ 10-rootfs.sh               mmdebstrap 构建 rootfs
-   ├─ 20-image.sh               分区 + GRUB 双启动 + qcow2
-   ├─ 30-verify.sh              产物校验与提示
-   ├─ fetch-keyring.sh          目标发行版 keyring（CI 必需）
-   ├─ smoke-test.sh             TCG 冒烟启动
-   ├─ make-seed.sh              cloud-init seed.iso
-   └─ test-boot.sh              本地 KVM 试启动
+├─ files/                        拷进镜像的静态配置
+├─ hooks/10-prepare.sh           源 / 用户 / Docker / 断言无 snapd
+├─ hooks/99-cleanup.sh           清缓存、主机标识、语言包
+└─ scripts/                      rootfs、组盘、校验、keyring、seed、冒烟、试启动
 ```
 
 ## License
