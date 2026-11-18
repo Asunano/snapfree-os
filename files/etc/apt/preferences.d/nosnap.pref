@@ -1,0 +1,4 @@
+# 永久拒绝 snapd 回流：任何包想把它拉回来都会因优先级 -10 被挡掉
+Package: snapd snap-confine snapd-apparmor ubuntu-core-launcher
+Pin: release a=*
+Pin-Priority: -10

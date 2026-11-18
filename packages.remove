@@ -1,0 +1,23 @@
+# 黑名单：如果被依赖意外拖进 rootfs，构建时自动 purge 掉
+# 一行一个包名，不存在的包会被跳过
+nginx
+nginx-common
+apache2
+apache2-bin
+apache2-utils
+mariadb-server
+mysql-server
+postgresql
+php8.3-cli
+php8.3-fpm
+php8.4-cli
+php8.4-fpm
+php8.5-cli
+php8.5-fpm
+snapd
+ubuntu-pro-client
+ubuntu-advantage-tools
+wpasupplicant
+wireless-tools
+plymouth
+plymouth-themes

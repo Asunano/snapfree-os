@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# 镜像内 apt 源切换工具
+#   apt-mirror                 列出可选镜像
+#   apt-mirror aliyun          切换并 apt update
+#   apt-mirror https://xxx/ubuntu   自定义源
+set -Eeuo pipefail
+
+SOURCES=/etc/apt/sources.list.d/ubuntu.sources
+[ "$(id -u)" -eq 0 ] || { echo "需要 root：sudo apt-mirror ..."; exit 1; }
+
+declare -A MIRRORS=(
+  [aliyun]="https://mirrors.aliyun.com/ubuntu"
+  [tuna]="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+  [ustc]="https://mirrors.ustc.edu.cn/ubuntu"
+  [huawei]="https://repo.huaweicloud.com/ubuntu"
+  [official]="http://archive.ubuntu.com/ubuntu"
+  [azure]="http://azure.archive.ubuntu.com/ubuntu"
+)
+
+NAME="${1:-}"
+
+if [ -z "$NAME" ] || [ "$NAME" = "list" ] || [ "$NAME" = "--list" ]; then
+  printf '可用镜像：\n'
+  for k in aliyun tuna ustc huawei official azure; do
+    printf '  %-9s %s\n' "$k" "${MIRRORS[$k]}"
+  done
+  printf '\n当前配置：\n'
+  grep -E '^URIs:' "$SOURCES" 2>/dev/null || echo "  （找不到 $SOURCES）"
+  exit 0
+fi
+
+if [ -n "${MIRRORS[$NAME]:-}" ]; then
+  URI="${MIRRORS[$NAME]}"
+elif [[ "$NAME" == http* ]]; then
+  URI="${NAME%/}"
+else
+  echo "未知镜像：$NAME（先用 apt-mirror 看列表）" >&2
+  exit 1
+fi
+
+SUITE=$(awk '/^Suites:/{print $2; exit}' "$SOURCES" 2>/dev/null || true)
+if [ -z "$SUITE" ]; then
+  # shellcheck disable=SC1091
+  SUITE=$(. /etc/os-release; printf '%s' "${VERSION_CODENAME:-}")
+fi
+
+BACKUP=$(mktemp)
+[ -f "$SOURCES" ] && cp "$SOURCES" "$BACKUP"
+
+cat > "$SOURCES" <<EOF
+Types: deb
+URIs: $URI
+Suites: $SUITE $SUITE-updates $SUITE-security
+Components: main universe
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+
+echo "切换至 $URI（$SUITE）"
+if ! apt-get update -q; then
+  echo "更新失败，回滚原配置" >&2
+  [ -s "$BACKUP" ] && cp "$BACKUP" "$SOURCES"
+  rm -f "$BACKUP"
+  exit 1
+fi
+rm -f "$BACKUP"
+
+echo
+echo "--- 当前源 ---"
+cat "$SOURCES"
+echo "--- 可直接安装的版本示例 ---"
+apt-cache policy nodejs npm 2>/dev/null | grep -E 'nodejs|npm|Installed|Candidate' || true

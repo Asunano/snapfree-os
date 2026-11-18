@@ -1,0 +1,15 @@
+# 无 cloud-init 数据源时的兜底网络配置：所有以太网口走 DHCP
+# net.ifnames=0 已写进内核命令行，因此网卡名是 eth0/eth1
+# __DNS_ADDRS__ 由构建 hook 用 DNS_ADDRS 变量替换
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    all-eth:
+      match:
+        name: "e*"
+      dhcp4: true
+      dhcp6: false
+      optional: true
+      nameservers:
+        addresses: [__DNS_ADDRS__]
