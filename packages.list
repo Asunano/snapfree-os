@@ -46,10 +46,13 @@ cloud-guest-utils
 grub-common
 grub2-common
 grub-efi-amd64-bin
+grub-pc
 grub-pc-bin
 initramfs-tools
 linux-image-generic
 
-# ---- 运行时（26.04 源内：nodejs 22.22.1 / npm 9.2.0）----
-nodejs
-npm
+# 注意：nodejs / npm / Docker / linux-firmware 都不预装
+#   需要就进系统后自己装：
+#     sudo apt install nodejs npm
+#     Docker 按官方文档加 download.docker.com 源
+#   构建时想预装：WITH_DOCKER=1 / WITH_FIRMWARE=1
