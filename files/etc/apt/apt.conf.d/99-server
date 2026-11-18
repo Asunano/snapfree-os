@@ -1,0 +1,7 @@
+# 服务器向的全局 apt 策略：不要推荐包、不要翻译索引
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+APT::Acquire::Retries "3";
+Acquire::Languages "none";
+Acquire::http::Timeout "20";
+Acquire::https::Timeout "20";

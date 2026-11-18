@@ -1,0 +1,55 @@
+# ============================================================
+# 核心包清单（服务器向，必装）
+#   运维常用工具在 packages-ops.list（WITH_OPS=0 可去掉）
+#   黑名单在 packages.remove（误入会被 purge）
+#
+# 这里刻意不含：
+#   - ubuntu-minimal / ubuntu-standard / ubuntu-server 种子包（会带 snapd）
+#   - nginx / apache2 / php / mariadb / postgresql 等业务软件
+# ============================================================
+
+# ---- init / 基础 ----
+systemd
+systemd-sysv
+udev
+dbus
+kmod
+procps
+psmisc
+util-linux
+e2fsprogs
+dosfstools
+
+# ---- 网络 / 下载（curl、wget 必须预装）----
+iptables
+iproute2
+iputils-ping
+curl
+wget
+ca-certificates
+gnupg
+
+# ---- 账户 / 区域 / 日志 ----
+sudo
+locales
+tzdata
+less
+logrotate
+
+# ---- 远程 / 初始化 ----
+openssh-server
+netplan.io
+cloud-init
+cloud-guest-utils
+
+# ---- 启动链 ----
+grub-common
+grub2-common
+grub-efi-amd64-bin
+grub-pc-bin
+initramfs-tools
+linux-image-generic
+
+# ---- 运行时（26.04 源内：nodejs 22.22.1 / npm 9.2.0）----
+nodejs
+npm
