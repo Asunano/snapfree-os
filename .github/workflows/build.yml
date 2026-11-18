@@ -39,7 +39,15 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/build.yml'   # 改流水线本身时自动跑一次验证
+      - '.github/workflows/build.yml'
+      - 'build.sh'
+      - 'conf.sh'
+      - 'scripts/**'
+      - 'hooks/**'
+      - 'packages.list'
+      - 'packages-ops.list'
+      - 'packages.remove'
+      - 'files/**'
     tags: ['v*']
   schedule:
     - cron: '0 18 1 * *'
