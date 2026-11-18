@@ -1,3 +1,4 @@
+# build-qcow2：Ubuntu 26.04 LTS 无 snap 服务器 qcow2 镜像
 name: build-qcow2
 
 on:
