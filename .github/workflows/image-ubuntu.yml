@@ -1,0 +1,226 @@
+# image-ubuntu：从 distros/ubuntu 构建无 snap 服务器 qcow2
+name: image-ubuntu
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Ubuntu 系列代号'
+        default: resolute
+        required: true
+      mirror:
+        description: '构建源（镜像站也可）'
+        default: 'https://archive.ubuntu.com/ubuntu'
+        required: true
+      guest_mirror:
+        description: '写进镜像的 apt 源（装机后使用）'
+        default: 'https://mirrors.aliyun.com/ubuntu'
+        required: true
+      img_size:
+        description: '磁盘虚拟大小'
+        default: '10G'
+        required: true
+      with_docker:
+        description: '预装 Docker CE（默认不装，纯净系统）'
+        type: boolean
+        default: false
+      with_ops:
+        description: '预装运维工具（git/vim/htop/tmux）'
+        type: boolean
+        default: true
+      with_firmware:
+        description: '预装 linux-firmware（默认不装，仅物理机/独服需要）'
+        type: boolean
+        default: false
+
+  push:
+    branches: [main]
+    paths:
+      - 'distros/ubuntu/**'
+    tags: ['v*']
+  schedule:
+    - cron: '0 18 1 * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: image-ubuntu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: bash 语法检查
+        working-directory: distros/ubuntu
+        run: |
+          set -euo pipefail
+          for f in build.sh conf.sh hooks/*.sh scripts/*.sh; do
+            bash -n "$f"
+            echo "ok  $f"
+          done
+
+      - name: shellcheck（提示，不阻断）
+        continue-on-error: true
+        working-directory: distros/ubuntu
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning -x build.sh conf.sh hooks/*.sh scripts/*.sh
+
+  build:
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 释放磁盘空间
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                       /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h /
+
+      - name: 安装构建依赖
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            mmdebstrap qemu-utils dosfstools parted gdisk e2fsprogs util-linux
+          mmdebstrap --version
+
+      - name: 构建 qcow2
+        shell: bash
+        working-directory: distros/ubuntu
+        env:
+          IN_MIRROR: ${{ github.event.inputs.mirror || 'https://archive.ubuntu.com/ubuntu' }}
+          IN_GUEST_MIRROR: ${{ github.event.inputs.guest_mirror || 'https://mirrors.aliyun.com/ubuntu' }}
+          IN_SUITE: ${{ github.event.inputs.suite || 'resolute' }}
+          IN_IMG_SIZE: ${{ github.event.inputs.img_size || '10G' }}
+          IN_DOCKER: ${{ github.event.inputs.with_docker }}
+          IN_OPS: ${{ github.event.inputs.with_ops }}
+          IN_FIRMWARE: ${{ github.event.inputs.with_firmware }}
+        run: |
+          set -euo pipefail
+          bool(){ [ "${1:-true}" = "false" ] && echo 0 || echo 1; }
+          wd=$(bool "$IN_DOCKER"); ops=$(bool "$IN_OPS"); fw=$(bool "$IN_FIRMWARE")
+          echo "mirror=$IN_MIRROR guest=$IN_GUEST_MIRROR suite=$IN_SUITE size=$IN_IMG_SIZE docker=$wd ops=$ops firmware=$fw"
+          sudo env \
+            MIRROR="$IN_MIRROR" \
+            GUEST_MIRROR="$IN_GUEST_MIRROR" \
+            SUITE="$IN_SUITE" \
+            IMG_SIZE="$IN_IMG_SIZE" \
+            WITH_DOCKER="$wd" \
+            WITH_OPS="$ops" \
+            WITH_FIRMWARE="$fw" \
+            bash ./build.sh 2>&1 | tee build.log
+
+      - name: 写入任务摘要
+        if: always()
+        shell: bash
+        working-directory: distros/ubuntu
+        run: |
+          {
+            echo "### 构建结果"
+            echo
+            if ls out/*.qcow2 >/dev/null 2>&1; then
+              echo "| 文件 | 大小 | SHA256 |"
+              echo "|---|---|---|"
+              for f in out/*.qcow2; do
+                echo "| $(basename "$f") | $(du -h "$f" | cut -f1) | $(sha256sum "$f" | cut -d' ' -f1) |"
+              done
+            else
+              echo "失败：没有产物，见 build.log"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 qcow2
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: |
+            distros/ubuntu/out/*.qcow2
+            distros/ubuntu/out/*.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: distros/ubuntu/build.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 QEMU + OVMF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf
+          ls /usr/share/OVMF/
+
+      - name: 取 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: distros/ubuntu/out
+
+      - name: 冒烟启动（TCG 无 KVM）
+        working-directory: distros/ubuntu
+        env:
+          SMOKE_TIMEOUT: '600'
+        run: |
+          set -euo pipefail
+          sudo -E bash ./scripts/smoke-test.sh
+
+      - name: 上传串口日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-log-${{ github.run_number }}
+          path: distros/ubuntu/work/serial.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  publish-latest:
+    needs: [build, smoke]
+    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish]')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 取 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: dist
+
+      - name: 写入到 image-latest Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          if gh release view image-latest >/dev/null 2>&1; then
+            gh release upload image-latest dist/* --clobber
+          else
+            gh release create image-latest dist/* \
+              --target "$GITHUB_SHA" \
+              --title "snapfree-os latest" \
+              --notes "仓库内镜像的 latest 发布（由 Actions 自动发布）。"
+          fi
+          gh release edit image-latest --latest
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$(basename "$(ls dist/*.qcow2 | head -1)")"
