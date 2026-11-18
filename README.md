@@ -1,15 +1,15 @@
 # ubuntu-snapfree-image
 
 用 GitHub Actions 从 Ubuntu 官方源构建**不含 snap 的服务器 qcow2**。
-一条 `Run workflow` 出镜像，打 tag 自动发 Release。
+push 即跑 lint → build → smoke（TCG 真启动到 login），打 tag 自动发 Release。
 
 ```
-ubuntu-26.04-server-snapfree-amd64.qcow2
+ubuntu-26.04-server-snapfree-amd64.qcow2   （约 1.4G）
 ├─ GPT：bios_grub + ESP(256M) + ext4 root
-├─ GRUB：UEFI(EFI/ubuntu + BOOTX64.EFI 兜底) 与 BIOS 双启动
-├─ 无 snapd（从未安装，且 apt Pin -10 永久封杀）
+├─ GRUB 2.14：UEFI(EFI/ubuntu + BOOTX64.EFI 兜底) 与 BIOS 双启动
+├─ 无 snapd（从未安装，apt Pin -10 永久封杀）
 ├─ nodejs 22.22.1 + npm 9.2.0，apt 直装，零第三方 JS 源
-├─ Docker CE（download.docker.com 的 resolute 源）
+├─ Docker CE 29.10（download.docker.com 的 resolute 源）
 └─ cloud-init：[NoCloud, ConfigDrive, None]，首启自动扩分区
 ```
 
@@ -19,47 +19,47 @@ ubuntu-26.04-server-snapfree-amd64.qcow2
 |---|---|---|
 | `nodejs` | 18.19.1（上游 Node 18 已于 2025-04 EOL） | **22.22.1** |
 | `npm` | 9.2.0 | 9.2.0（独立包） |
-| 不加第三方源就拿到现代 Node | ❌ | ✅ |
+| 不加第三方源就拿到现代 Node | 否 | 是 |
 | 标准支持 | 2029-04 | 2031-04 |
+| 内核 | 6.8 | 7.0.0-43（实测日志） |
 
-24.04 上要 node 22 只能挂 NodeSource，等于又把“额外加源”背回来了。
+24.04 上要 node 22 只能挂 NodeSource，等于又把额外加源背回来了。
 
-## 在 Actions 里构建
+## 怎么触发
 
-1. 推到 GitHub：
+| 方式 | 何时 | 做什么 |
+|---|---|---|
+| Actions 页 `Run workflow` | 手动 | 可填参数，见下表 |
+| push 到 main | 改 `.github/workflows/build.yml` / `build.sh` / `conf.sh` / `scripts/**` / `hooks/**` / `packages*.list` / `files/**` | 自动跑一整条流水线 |
+| push tag `v*` | 发布 | 构建 + 启动验证 + 传到 Release |
+| schedule | 每月 1 日 18:00 UTC | 定时重建，吃掉最新安全补丁 |
 
-```bash
-git init && git add . && git commit -m "init"
-git remote add origin git@github.com:<你>/ubuntu-snapfree-image.git
-git push -u origin main
-```
+改 README / LICENSE 这类不影响镜像的文件**不会**触发构建。
 
-2. 仓库 → **Actions** → 左侧 `build-qcow2` → **Run workflow**，填参数：
+`Run workflow` 参数：
 
 | 输入 | 默认 | 说明 |
 |---|---|---|
 | `suite` | `resolute` | Ubuntu 代号 |
 | `mirror` | `https://archive.ubuntu.com/ubuntu` | **构建**用源（runner 在海外，走官方最快） |
 | `guest_mirror` | `https://mirrors.aliyun.com/ubuntu` | **写进镜像**的源（装机在国内直连） |
-| `img_size` | `10G` | 磁盘虚拟大小（稀疏，实际占用约 1.5G） |
+| `img_size` | `10G` | 磁盘虚拟大小（稀疏，实际文件约 1.4G） |
 | `with_docker` | `true` | 预装 Docker CE |
 | `with_ops` | `true` | 运维工具层（git/vim/htop/tmux/rsync/jq…） |
 | `with_firmware` | `true` | `linux-firmware`，物理机网卡/RAID 卡需要，约 +500MB |
-| `smoke_test` | `false` | 构建后用 TCG 启动一次，验证能进 cloud-init/login |
 
-3. 跑完在 run 页面底部下载 Artifact：`qcow2-<run_number>`（保留 14 天）。
+## 流水线
 
-4. 想长期分发 → 打 tag 即自动发 Release：
+| job | 时间 | 做什么 |
+|---|---|---|
+| `lint` | ~10s | 全部脚本 `bash -n`；shellcheck 只提示不阻断 |
+| `build` | ~9min | mmdebstrap 出 rootfs → 组盘 → GRUB 双启动 → qcow2 |
+| `smoke` | ~1.5min | 下载产物，TCG 无 KVM 启动，串口必须出现 `Cloud-init v` 或 `login:` |
+| `release` | 仅 tag | 把 qcow2 + sha256 传到 Release |
 
-```bash
-git tag v26.04-20261118 && git push origin v26.04-20261118
-```
+产物（Artifacts，保留 14/7 天）：`qcow2-<run号>`、`build-log-<run号>`、`serial-log-<run号>`（冒烟串口全文，排障必备）。
 
-`release` job 会把 qcow2 + sha256 传到 Release 资产里，下载地址稳定。
-
-> runner 是 `ubuntu-24.04`，其 keyring 只有 noble 的密钥。构建时 `build.sh` 会自动探测宿主代号 ≠ 目标代号，从目标发行版的 `Packages.gz` 里取 `ubuntu-keyring` 并传给 `mmdebstrap --keyring`，**不需要任何手工干预**。
-
-工作流每月 1 日定时重建一次，保证镜像里的 deb 是最新安全补丁版本。
+> runner 是 `ubuntu-24.04`，其 keyring 只有 noble 的密钥。`build.sh` 会自动探测宿主代号 ≠ 目标代号，从目标发行版的 `Packages.gz` 里取 `ubuntu-keyring` 并传给 `mmdebstrap --keyring`，不需要手工干预。
 
 ## 本地构建
 
@@ -76,7 +76,7 @@ sudo ./build.sh
 
 ```bash
 WITH_DOCKER=false ./build.sh          # 去掉 Docker，省约 500MB
-WITH_OPS=false ./build.sh             # 不带 git/vim/htop/tmux，纯运行环境
+WITH_OPS=false ./build.sh             # 不带 git/vim/htop/tmux
 WITH_QGA=false ./build.sh             # 物理机不要 qemu-guest-agent
 WITH_FIRMWARE=false ./build.sh        # 省 500MB，网卡缺固件时再开
 IMG_SIZE=20G ./build.sh
@@ -99,7 +99,7 @@ growpart /dev/sdX 3 && resize2fs /dev/sdXp3
 
 # KVM / Proxmox / libvirt
 virt-install --name u2604 --memory 2048 --vcpus 2 --import \
-  --disk ubuntu-26.04-server-snapfree-amd64.qcow2 --os-variant ubuntu24.04
+  --disk ubuntu-26.04-server-snapfree-amd64.qcow2 --os-variant ubuntu26.04
 ```
 
 登录方式（二选一）：
@@ -112,7 +112,7 @@ virt-install --name u2604 --memory 2048 --vcpus 2 --import \
 USER_PASSWORD=xxx SSH_PASSWORD_AUTH=yes ./build.sh
 ```
 
-镜像里 root 锁定、SSH 默认只认密钥，**没有 seed 也没有密码时是登不进去的**（串口控制台也一样）。
+镜像里 root 锁定、SSH 默认只认密钥，**没有 seed 也没有密码时是登不进去的**。
 
 ## 镜像规格
 
@@ -122,17 +122,15 @@ USER_PASSWORD=xxx SSH_PASSWORD_AUTH=yes ./build.sh
 | 分区 | p1 `bios_grub` 1–2MiB ／ p2 ESP vfat 2–258MiB ／ p3 ext4 剩余 |
 | 内核参数 | `net.ifnames=0 biosdevname=0`（网卡固定 eth0）+ 串口 `ttyS0,115200n8` |
 | 网络 | netplan：所有 `e*` 网口 DHCP，DNS 固定 `223.5.5.5 / 119.29.29.29`（`DNS_ADDRS=` 可关） |
-| 预装 | `curl`、`wget`、`ca-certificates`、`nodejs/npm`、`openssh-server`、`cloud-init`、Docker CE（可选） |
+| 预装 | `curl`、`wget`、`ca-certificates`、`nodejs/npm`、`openssh-server`、`cloud-init`、Docker CE、qemu-guest-agent |
 | 不装 | nginx、apache2、php、mariadb/postgresql、snapd、ubuntu-pro-client、plymouth、wpa_supplicant |
 | 已清 | machine-id、ssh host key、apt 缓存/日志、changelog、非中英文语言包 |
 
 ## 服务器向精简与调优
 
-这一层是“装机即用、但不背日用/桌面包袱”的部分，全部在构建时写死，不需要装完再手工改。
-
 **源**
 
-- 构建源 `MIRROR` 与镜像内源 `GUEST_MIRROR` 分离：CI 在海外用官方源加速，镜像里写阿里云。
+- 构建源 `MIRROR` 与镜像内源 `GUEST_MIRROR` 分离。
 - 镜像内置 `/usr/local/bin/apt-mirror`，一条命令换源并自动回滚：
 
 ```bash
@@ -141,33 +139,33 @@ sudo apt-mirror tuna            # 切清华源并 apt update
 sudo apt-mirror https://xxx/ubuntu
 ```
 
-- `/etc/apt/apt.conf.d/99-server`：全局 `Install-Recommends=false`、`Install-Suggests=false`、`Acquire::Languages=none`、重试 3 次。从源头卡住“装一个带十个”。
-- `/etc/apt/apt.conf.d/20auto-upgrades` + 关掉 `apt-daily.timer`/`apt-daily-upgrade.timer`：后台不再自动跑 apt。
+- `/etc/apt/apt.conf.d/99-server`：全局 `Install-Recommends=false`、`Install-Suggests=false`、`Acquire::Languages=none`、超时 20s。
+- `/etc/apt/apt.conf.d/20auto-upgrades` 全 0，并关掉 `apt-daily.timer` / `apt-daily-upgrade.timer` / `motd-news.timer`。
 
 **清理**
 
-- `packages.remove` 黑名单（nginx/apache/php/mariadb/postgresql/snapd/plymouth/wpasupplicant…）：如果被依赖意外拖进来，构建期自动 `purge --auto-remove`，并断言 snapd 不存在。
-- 收尾删 `changelog`、`/usr/share/locale` 里除 `en*/zh*` 之外的全部目录（这一项通常省 150MB+），保留 `copyright` 满足许可证要求。
+- `packages.remove` 黑名单（nginx/apache/php/mariadb/postgresql/snapd/plymouth/wpasupplicant…）：被依赖意外拖进来时，构建期自动 `purge --auto-remove`，并断言 snapd 不存在、`/snap` 不存在。
+- 收尾删 `changelog`、`/usr/share/locale` 里除 `en*/zh*` 之外的全部目录，保留 `copyright` 满足许可证要求。
 
 **调优**
 
 | 文件 | 内容 |
 |---|---|
-| `/etc/sysctl.d/99-server.conf` | BBR + fq、`somaxconn=4096`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
-| `/etc/modules-load.d/99-server.conf` | `tcp_bbr`（开机加载，否则 sysctl 里的 bbr 生不效） |
+| `/etc/sysctl.d/99-server.conf` | BBR + fq、`somaxconn=4096`、`tcp_max_syn_backlog=8192`、`tcp_fastopen=3`、`ip_forward=1`、`swappiness=10`、`file-max=1M` |
+| `/etc/modules-load.d/99-server.conf` | `tcp_bbr`（开机加载，否则 sysctl 里的 bbr 不生效） |
 | `/etc/systemd/journald.conf.d/99-server.conf` | 日志上限 200M，保留 30 天 |
 | `/etc/security/limits.d/99-server.conf` | `nofile 65535`、`nproc 32768` |
-| `motd` | 删掉 help-text / motd-news / cloudimg 广告脚本，只留 header |
+| `motd` | 删掉 help-text / motd-news / cloudimg 广告脚本 |
 
-`fstrim.timer`、`logrotate.timer`、`systemd-timesyncd` 已启用；`multiuser.target` 为默认目标。
+`fstrim.timer`、`logrotate.timer`、`systemd-timesyncd` 已启用；`multi-user.target` 为默认目标。
 
 ## 已知限制
 
 1. **不支持 Secure Boot**：GRUB 未签名，BIOS 里要关掉。
 2. **npm 是 9.2.0**（Ubuntu 打包版本）；要新版 `sudo npm i -g npm@latest`，不涉及 apt 源。
-3. **systemd 259 已移除 cgroup v1**：极老的服务/容器运行时会起不来，Docker CE 2.x 正常。
-4. **`linux-firmware` 默认装**（网卡/RAID 卡需要）；`with_firmware=false` 可省约 500MB，但部分 Intel/Realtek 网卡会缺固件。
-5. **全局关闭了 recommends**：后续 `apt install nginx` 只装必需包，需要推荐包时显式 `--install-recommends`。
+3. **systemd 259 已移除 cgroup v1**：极老的服务/容器运行时会起不来，Docker CE 29.x 正常。
+4. **`linux-firmware` 默认装**；`with_firmware=false` 可省约 500MB，但部分 Intel/Realtek 网卡会缺固件。
+5. **全局关闭 recommends**：后续 `apt install nginx` 只装必需包，要推荐包时显式 `--install-recommends`。
 6. **arm64 未适配**：需改 `scripts/20-image.sh` 的 GRUB target 为 `arm64-efi`，并从 `packages.list` 去掉 `grub-pc-bin`。
 
 ## 仓库结构
@@ -196,12 +194,12 @@ sudo apt-mirror https://xxx/ubuntu
 ├─ hooks/99-cleanup.sh           清缓存、主机标识、changelog、多余语言包
 └─ scripts/
    ├─ 10-rootfs.sh               mmdebstrap 构建 rootfs
-   ├─ 20-image.sh                分区 + GRUB 双启动 + qcow2
-   ├─ 30-verify.sh               产物校验与提示
-   ├─ fetch-keyring.sh           目标发行版 keyring（CI 必需）
-   ├─ smoke-test.sh              TCG 冒烟启动
-   ├─ make-seed.sh               cloud-init seed.iso
-   └─ test-boot.sh               本地 KVM 试启动
+   ├─ 20-image.sh               分区 + GRUB 双启动 + qcow2
+   ├─ 30-verify.sh              产物校验与提示
+   ├─ fetch-keyring.sh          目标发行版 keyring（CI 必需）
+   ├─ smoke-test.sh             TCG 冒烟启动
+   ├─ make-seed.sh              cloud-init seed.iso
+   └─ test-boot.sh              本地 KVM 试启动
 ```
 
 ## License
