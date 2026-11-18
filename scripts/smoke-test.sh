@@ -9,17 +9,24 @@ IMG="$OUT_DIR/$IMAGE_NAME.qcow2"
 LOG="$WORK_DIR/serial.log"
 TIMEOUT="${SMOKE_TIMEOUT:-420}"
 
-[ -f "$IMG" ] || { echo "[!] 找不到 $IMG"; exit 1; }
+# CI 里是干净 checkout，work/ 与 out/ 可能不存在
+mkdir -p "$WORK_DIR" "$OUT_DIR"
+
+[ -f "$IMG" ] || { echo "[!] 找不到 $IMG"; ls -lR "$OUT_DIR" 2>/dev/null; exit 1; }
+
+echo "镜像：$IMG（$(du -h "$IMG" | cut -f1)）"
 
 CODE=""
 for f in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/ovmf/OVMF.fd; do
   [ -f "$f" ] && CODE="$f" && break
 done
-[ -n "$CODE" ] || { echo "[!] 缺 OVMF 固件"; exit 1; }
+[ -n "$CODE" ] || { echo "[!] 缺 OVMF 固件（apt install ovmf）"; ls /usr/share/OVMF 2>/dev/null; exit 1; }
+
+echo "OVMF：$CODE"
 
 VARS_SRC="${CODE/OVMF_CODE/OVMF_VARS}"
 [ -f "$VARS_SRC" ] || VARS_SRC="$(dirname "$CODE")/OVMF_VARS.fd"
-[ -f "$VARS_SRC" ] || { echo "[!] 缺 OVMF_VARS 模板"; exit 1; }
+[ -f "$VARS_SRC" ] || { echo "[!] 缺 OVMF_VARS 模板"; ls /usr/share/OVMF 2>/dev/null; exit 1; }
 VARS="$WORK_DIR/OVMF_VARS.fd"
 cp -f "$VARS_SRC" "$VARS"
 
@@ -49,7 +56,7 @@ kill "$QPID" 2>/dev/null || true
 wait "$QPID" 2>/dev/null || true
 
 echo "--- 串口尾部 ---"
-tail -n 30 "$LOG" || true
+tail -n 40 "$LOG" || true
 
 if [ "$found" -eq 1 ]; then
   echo "[+] 冒烟通过：内核启动并进入 cloud-init/login"
