@@ -219,3 +219,30 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --verify-tag
+
+  publish-latest:
+    needs: [build, smoke]
+    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish]')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 取 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          name: qcow2-${{ github.run_number }}
+          path: dist
+
+      - name: 写入到 image-latest Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          if gh release view image-latest >/dev/null 2>&1; then
+            gh release upload image-latest dist/* --clobber
+          else
+            gh release create image-latest dist/* \
+              --title "Ubuntu 26.04 LTS snapfree (latest)" \
+              --notes "Ubuntu 26.04 LTS 无 snapd / 无 node / 无 Docker 服务器镜像；由 Actions 自动发布。"
+          fi
+          gh release edit image-latest --latest
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$(basename "$(ls dist/*.qcow2 | head -1)")"
