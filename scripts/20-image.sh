@@ -78,6 +78,8 @@ chroot "$MNT" /usr/bin/env \
   bash -eu -o pipefail <<'CHROOT'
 export DEBIAN_FRONTEND=noninteractive
 
+# 镜像里只装了 grub-*-bin，没有 metapackage，/boot/grub 需自建
+mkdir -p /boot/grub
 grub-mkconfig -o /boot/grub/grub.cfg
 
 # UEFI：正常条目（--no-nvram 不写虚拟机 NVRAM）+ 固件兜底路径
