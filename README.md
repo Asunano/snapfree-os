@@ -4,7 +4,7 @@
 
 ```
 ubuntu-26.04-server-snapfree-amd64.qcow2
-文件 约 1.4G 容量，虚拟磁盘 10G（稀疏）
+文件 约 1.3G（run #8 实测 1.23 GB），虚拟磁盘 10G（稀疏）
 ├─ GPT：p1 bios_grub ｜ p2 ESP vfat 256M ｜ p3 ext4 剩余
 ├─ GRUB 2.14：UEFI（ EFI/ubuntu + BOOTX64.EFI 兑底 ）与 BIOS 双启动
 ├─ 内核 7.0.0-43-generic，命令行带 console=ttyS0,115200n8
