@@ -1,0 +1,92 @@
+# installer-contract：安装器与清单的契约测试
+name: installer-contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'installer/**'
+      - 'catalog/**'
+      - '.github/workflows/installer-contract.yml'
+  schedule:
+    - cron: '0 19 1 * *'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 脚本语法
+        run: |
+          set -euo pipefail
+          bash -n installer/reinstall.sh
+          bash -n installer/trans.sh
+          echo "bash -n ok"
+
+      - name: 安装器必须指向本仓库且带菜单
+        run: |
+          set -euo pipefail
+          R=installer/reinstall.sh
+          grep -q "sf_menu" $R
+          grep -q "sf_lookup_img" $R
+          grep -q "confhome=https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/installer" $R
+          grep -q "sf_catalog=\$sf_repo/catalog/catalog.tsv" $R
+          echo "菜单与 confhome ok"
+
+      - name: 不许回落官网 cloud image
+        run: |
+          set -euo pipefail
+          R=installer/reinstall.sh
+          grep -q 'if false; then' $R
+          grep -q '仓库中没有 ubuntu' $R
+          echo "只能选仓库镜像 ok"
+
+      - name: 版本号一致（trans.sh 会被校验）
+        run: |
+          set -euo pipefail
+          a=$(grep -m1 '^SCRIPT_VERSION=' installer/reinstall.sh)
+          b=$(grep -m1 '^SCRIPT_VERSION=' installer/trans.sh)
+          [ "$a" = "$b" ]
+          echo "$a"
+
+      - name: 清单格式与必填字段
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS='|' read -r id distro rel arch variant name size url sha; do
+            case "$id" in '' | '#'*) continue ;; esac
+            for v in "$id" "$distro" "$rel" "$arch" "$name" "$url"; do
+              [ -n "$v" ] || { echo "字段为空: $id"; exit 1; }
+            done
+            echo "$url" | grep -qE '^https?://' || { echo "url 非法: $id"; exit 1; }
+            n=$((n + 1))
+          done <catalog/catalog.tsv
+          [ "$n" -ge 1 ]
+          echo "catalog 条目: $n"
+
+      - name: 清单里的镜像可下载
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS='|' read -r id distro rel arch variant name size url sha; do
+            case "$id" in '' | '#'*) continue ;; esac
+            code=$(curl -sSIL -o /dev/null -w '%{http_code}' --max-time 60 "$url" || true)
+            echo "$id -> $code"
+            [ "$code" = 200 ] || { echo "下载不可用: $url"; exit 1; }
+            n=$((n + 1))
+          done <catalog/catalog.tsv
+          echo "已验证 $n 个镜像"
+
+      - name: 菜单能渲染（伪终端）
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mt
+          printf '# id|distro|release|arch|variant|name|size|url|sha256\nubuntu-26.04|ubuntu|26.04|any|server|测试条目|1.2G|https://example.com/a.qcow2|-\n' >/tmp/mt/catalog.tsv
+          sed -n '/# >>> snapfree: 镜像菜单/,/# <<< snapfree: 镜像菜单/p' installer/reinstall.sh >/tmp/mt/menu.sh
+          printf '1\ny\n' | script -qec "bash -c 'set -u; tmp=/tmp/mt; sf_catalog=/tmp/mt/catalog.tsv; info(){ :; }; warn(){ :; }; error(){ echo ERR \$*; }; error_and_exit(){ echo ERR \$*; exit 1; }; reinstall_____=x; . /tmp/mt/menu.sh; sf_menu; echo GOT=\$sf_sel_distro,\$sf_sel_release'" /dev/null | grep 'GOT=ubuntu,26.04'
+          echo "菜单 ok"
