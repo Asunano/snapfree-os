@@ -28,9 +28,10 @@ printf '%s\n' "$TIMEZONE" > "$ROOT/etc/timezone"
 sed -i "s/__USER_NAME__/$USER_NAME/g" "$ROOT/etc/cloud/cloud.cfg.d/99-image.cfg"
 
 # ---------- 兜底网络（不写 netplan）----------
-# reinstall 装机会在 /etc/netplan 生成 50-cloud-init.yaml；
-# 镜像里再放一份 netplan 会因同一网卡被两次定义而报错，导致整份配置不生效（网络全断）。
-# 因此这里只放 systemd-networkd 的兜底配置，它只负责最基础的 DHCP，可与 netplan 共存。
+# reinstall 装机会生成 /etc/netplan/50-cloud-init.yaml；
+# 镜像再放一份 netplan 会让同一网卡被定义两次，netplan 直接报错，
+# 整份网络配置都不生效（表现为装完 ping 不通、SSH 连不上）。
+# 所以这里只放 systemd-networkd 的兜底配置，能与 netplan 共存。
 NC="$ROOT/etc/systemd/network/99-fallback-dhcp.network"
 mkdir -p "$(dirname "$NC")"
 if [ -n "${DNS_ADDRS:-}" ]; then
@@ -53,8 +54,9 @@ EOF
 rm -f "$ROOT/etc/apt/sources.list"
 log "镜像内源：$GUEST_MIRROR（可用 apt-mirror 切换）"
 
-[ -f "$ROOT/usr/share/keyrings/ubuntu-archive-keyring.gpg" ] \
-  || log "warn: 缺 ubuntu-archive-keyring.gpg，镜像内 apt 可能报 NO_PUBKEY"
+if [ ! -f "$ROOT/usr/share/keyrings/ubuntu-archive-keyring.gpg" ]; then
+  log "warn: 缺 ubuntu-archive-keyring.gpg，镜像内 apt 可能报 NO_PUBKEY"
+fi
 
 # 构建期给 chroot 一个能用的 DNS
 cp -L /etc/resolv.conf "$ROOT/etc/resolv.conf" 2>/dev/null || true
@@ -72,13 +74,17 @@ rm -f "$ROOT/etc/update-motd.d/10-help-text" \
       "$ROOT/etc/update-motd.d/50-motd-news" \
       "$ROOT/etc/update-motd.d/50-cloud-init" \
       "$ROOT/etc/update-motd.d/60-cloudimg-settings"
-[ -f "$ROOT/etc/default/motd-news" ] && sed -i 's/^ENABLED=.*/ENABLED=0/' "$ROOT/etc/default/motd-news"
+if [ -f "$ROOT/etc/default/motd-news" ]; then
+  sed -i 's/^ENABLED=.*/ENABLED=0/' "$ROOT/etc/default/motd-news"
+fi
 
 RESOLVED_UNIT=""
 for u in "$ROOT/lib/systemd/system/systemd-resolved.service" "$ROOT/usr/lib/systemd/system/systemd-resolved.service"; do
-  [ -e "$u" ] && RESOLVED_UNIT="$u"
+  if [ -e "$u" ]; then RESOLVED_UNIT="$u"; fi
 done
-[ -n "$RESOLVED_UNIT" ] && syscfg enable systemd-resolved.service
+if [ -n "$RESOLVED_UNIT" ]; then
+  syscfg enable systemd-resolved.service
+fi
 
 if [ -e "$ROOT/lib/systemd/system/qemu-guest-agent.service" ] || \
    [ -e "$ROOT/usr/lib/systemd/system/qemu-guest-agent.service" ]; then
@@ -130,15 +136,15 @@ fi
 
 if [ -n "$USER_PASSWORD" ]; then
   chroot "$ROOT" bash -ec "printf '%s:%s\\n' \"\$0\" \"\$1\" | chpasswd" "$USER_NAME" "$USER_PASSWORD"
-  log "已设置 $USER_NAME 密码（是否允许密码登录见下）"
+  log "已设置 $USER_NAME 密码"
 fi
 
-# SSH：默认允许密码登录（不再强制只允许密钥）
+# SSH：默认允许密码登录；没设密码时给出提示
 if ! grep -qi '^PasswordAuthentication yes' "$ROOT/etc/ssh/sshd_config.d/10-image.conf"; then
   printf 'PasswordAuthentication yes\n' >> "$ROOT/etc/ssh/sshd_config.d/10-image.conf"
 fi
 if [ -z "$USER_PASSWORD" ]; then
-  log "warn: 未设 USER_PASSWORD，$USER_NAME 没有密码，密码登录仍不可用"
+  log "warn: 未设 USER_PASSWORD，$USER_NAME 没密码，密码登录不可用（密钥不限）"
 fi
 
 # ---------- 收尾：DNS ----------
@@ -153,6 +159,13 @@ fi
 if chroot "$ROOT" dpkg-query -W -f='${db:Status-Status}\n' snapd >/dev/null 2>&1; then
   printf '[!] snapd 被意外安装进来了\n' >&2; exit 1
 fi
-[ -e "$ROOT/snap" ] && { printf '[!] rootfs 里出现了 /snap\n' >&2; exit 1; }
-[ -e "$ROOT/etc/netplan/10-image.yaml" ] && { printf '[!] 镜像里不应再有 netplan 兜底文件（会与安装器生成的 50-cloud-init.yaml 冲突）\n' >&2; exit 1; }
-log "校验通过：snapd 未安装，/snap 不存在，netplan 无重复定义"
+if [ -e "$ROOT/snap" ]; then
+  printf '[!] rootfs 里出现了 /snap\n' >&2; exit 1
+fi
+if [ -e "$ROOT/etc/netplan/10-image.yaml" ]; then
+  printf '[!] 镜像里不应再有 netplan 兜底文件（会与安装器生成的 50-cloud-init.yaml 冲突）\n' >&2; exit 1
+fi
+if [ ! -e "$ROOT/etc/systemd/network/99-fallback-dhcp.network" ]; then
+  printf '[!] 缺兜底网络配置\n' >&2; exit 1
+fi
+log "校验通过：无 snapd，无 /snap，netplan 无重复定义，兜底网络就位"
