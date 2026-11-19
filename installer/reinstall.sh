@@ -117,25 +117,23 @@ sf_mirrors() {
         https://axisnow.gh-proxy.org
 }
 
-# 探测镜像站是否能拿到目标文件（HEAD 优先，不支持 HEAD 的用 1KB Range 兜底）
-# 注意：很多代理会用 200 + text/html 返回错误页，因此要校验 content-type/content-length
-sf_mirror_probe() {
-    local _h _ct _cl
-    _h=$(curl -fsSLI --max-time 8 --connect-timeout 5 "$1" 2>/dev/null) || {
-        curl -fsSL -o /dev/null -r 0-1023 --max-filesize 65536 \
-            --max-time 8 --connect-timeout 5 "$1" >/dev/null 2>&1
-        return
-    }
-    _ct=$(printf '%s\n' "$_h" | tr -d '\r' | awk 'tolower($1)=="content-type:"{v=tolower($2)} END{print v}')
-    _cl=$(printf '%s\n' "$_h" | tr -d '\r' | awk 'tolower($1)=="content-length:"{v=$2} END{print v}')
-    case "$_ct" in
-    *text/html* | *application/json* | *text/plain*) return 1 ;;
-    esac
-    if [ -n "$_cl" ]; then
-        [ "$_cl" -gt 65536 ] 2>/dev/null && return 0
-        return 1
-    fi
-    return 0
+# 测速：拉 1MB 区间，返回字节/秒；拿不到或是错误页就失败
+# 很多代理会用 200 + text/html 返回错误页，所以要校验 content-type 与大小
+sf_mirror_speed() {
+    local _o _code _size _spd _ct
+    _o=$(curl -sSL -o /dev/null --max-time 10 --connect-timeout 5 \
+        -r 0-1048575 --max-filesize 4194304 \
+        -w '%{http_code} %{size_download} %{speed_download} %{content_type}' "$1" 2>/dev/null) || return 1
+    _code=${_o%%%% *}
+    _o=${_o#* }
+    _size=${_o%%%% *}
+    _o=${_o#* }
+    _spd=${_o%%%% *}
+    _ct=${_o#* }
+    case "$_code" in 200 | 206) ;; *) return 1 ;; esac
+    case "$_ct" in *text/html*) return 1 ;; esac
+    [ "$_size" -ge 65536 ] 2>/dev/null || return 1
+    printf '%.0f\n' "$_spd"
 }
 
 sf_accel_is_cn() {
@@ -154,6 +152,20 @@ sf_accel_is_cn() {
     [ "$_c" = CN ]
 }
 
+# 逐个镜像站测速，输出最快的那一个（全不通则无输出）
+sf_pick_mirror() {
+    local _u=$1 _m _spd _best= _bestspd=0
+    for _m in $(sf_mirrors); do
+        _spd=$(sf_mirror_speed "$_m/$_u") || continue
+        echo "mirror: $_m ${_spd} B/s" >&2
+        if [ "$_spd" -gt "$_bestspd" ] 2>/dev/null; then
+            _bestspd=$_spd
+            _best=$_m
+        fi
+    done
+    [ -n "$_best" ] && printf '%s' "$_best"
+}
+
 sf_accel_url() {
     local _u=$1 _m
     case "$_u" in
@@ -164,41 +176,35 @@ sf_accel_url() {
         ;;
     esac
 
-    # 同一趟安装里选中的镜像站会缓存，避免每个链接都探测一通
+    # 同一趟安装只选一次站，后面直接复用；直连也是
     if [ -n "${_sf_mirror:-}" ]; then
         printf '%s/%s' "$_sf_mirror" "$_u"
         return 0
     fi
-
-    if sf_accel_is_cn; then
-        for _m in $(sf_mirrors); do
-            if sf_mirror_probe "$_m/$_u"; then
-                _sf_mirror=$_m
-                echo "Location: CN, mirror=$_m" >&2
-                printf '%s/%s' "$_m" "$_u"
-                return 0
-            fi
-        done
-        echo "mirror: 国内镜像站均不可用，回落到 GitHub 直连" >&2
+    if [ -n "${_sf_direct:-}" ]; then
         printf '%s' "$_u"
         return 0
     fi
 
-    if curl -fsSLI -o /dev/null --max-time 8 --connect-timeout 5 https://github.com/ >/dev/null 2>&1; then
+    # 海外机器：GitHub 直连通就不加速
+    if ! sf_accel_is_cn && curl -fsSLI -o /dev/null --max-time 8 --connect-timeout 5 https://github.com/ >/dev/null 2>&1; then
+        _sf_direct=1
         printf '%s' "$_u"
         return 0
     fi
-    echo "mirror: GitHub 不可达，尝试镜像站" >&2
-    for _m in $(sf_mirrors); do
-        if sf_mirror_probe "$_m/$_u"; then
-            _sf_mirror=$_m
-            echo "Location: 非 CN 且 GitHub 不通, mirror=$_m" >&2
-            printf '%s/%s' "$_m" "$_u"
-            return 0
-        fi
-    done
+
+    _m=$(sf_pick_mirror "$_u")
+    if [ -n "$_m" ]; then
+        _sf_mirror=$_m
+        echo "mirror: 选中最快站点 $_m" >&2
+        printf '%s/%s' "$_m" "$_u"
+        return 0
+    fi
+    echo "mirror: 所有镜像站均不可用，回落到 GitHub 直连" >&2
+    _sf_direct=1
     printf '%s' "$_u"
 }
+
 sf_lookup_img() {
     # $1=distro $2=releasever -> 输出 img url
     local _d=$1 _r=$2 _f _id _distro _rel _arch _variant _name _size _url _sha
