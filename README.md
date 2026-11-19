@@ -1,27 +1,35 @@
 # snapfree-os
 
-一个小仓库，同时放两件事：**服务器镜像的构建**（`distros/<os>`）和 **把这些镜像装到机器上的安装器**（fork 自 [bin456789/reinstall](https://github.com/bin456789/reinstall)）。镜像清单 `catalog/catalog.tsv` 是唯一真源，安装菜单只列清单里的条目。
+一个给 **VPS / 云服务器 / KVM 虚拟机** 用的重装系统工具。
 
-## 可用镜像
+特点一句话说完：系统里不塞垃圾（没有 snap、没有 Docker、没有 nodejs），装完就是干净的服务器，但你常用的优化（BBR 加速、swap、国内软件源、对时）都已经配好。
 
-| 镜像 | 基线 | 体积 | 下载 |
-|---|---|---|---|
-| `ubuntu-26.04-server-snapfree` | Ubuntu 26.04 LTS | 1.2G | [qcow2](https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-26.04-server-snapfree-amd64.qcow2) |
-| `ubuntu-24.04-server-snapfree` | Ubuntu 24.04 LTS | 1.1G | [qcow2](https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-24.04-server-snapfree-amd64.qcow2) |
-| `debian-13-server-snapfree` | Debian 13 trixie | 350M | [qcow2](https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2) |
-| `debian-12-server-snapfree` | Debian 12 bookworm | 380M | [qcow2](https://github.com/Asunano/snapfree-os/releases/latest/download/debian-12-server-snapfree-amd64.qcow2) |
+只能装在 **KVM / 云主机 / VPS** 上，不支持 OpenVZ/LXC，也不能装在物理机上。
 
-四套镜像各自独立构建（各自的源、组件、keyring、内核包名），但**优化基线完全一致**（同一份 sysctl / limits / timesyncd / 首启脚本）。
+## 能装哪些系统
 
-## 一键安装
+| 系统 | 版本 | 下载大小 |
+|---|---|---|
+| Ubuntu | 26.04 LTS / 24.04 LTS | 1.2G / 1.1G |
+| Debian | 13 (trixie) / 12 (bookworm) | 350M / 380M |
 
-在要重装的机器上（root，只支持 KVM / 云主机 / VPS）：
+四套都是 64 位 x86_64。系统都是从零构建的纯净版，优化配置四套完全一致。
+
+## 怎么装
+
+用 root 登录你的服务器（SSH 或服务商网页控制台都行），把下面这一整行复制粘贴进去，回车：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)
 ```
 
-会出现菜单（只能选仓库内镜像）：
+> 如果这一步卡住或报错（国内访问 GitHub 经常很慢），换成这条走加速的：
+>
+> ```bash
+> bash <(curl -fsSL https://mirror-one.losn.cc/https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)
+> ```
+
+然后会出现一个菜单，用数字选你要装的系统：
 
 ```text
 ***** 可选镜像 *****
@@ -32,109 +40,99 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/ins
    0) 退出
 ```
 
-不想要菜单，直接指定（仍然只认仓库镜像，清单里没有的版本直接报错，不会回落到官方 cloud image）：
+菜单里**只能选仓库里有的镜像**，选完就会自动下载、写入磁盘、重启进新系统。整个过程中途会断一次 SSH，属正常。
+
+### 建议顺便设置的东西
+
+- **密码**：安装时会问。不想设密码就设置 SSH 密钥（更安全，推荐）
+- **主机名、DNS、时区**：安装器都会问，一路回车用默认也可以
+
+不想用菜单也可以直接指定（同样只认仓库里的镜像）：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh) \
-  ubuntu 24.04 --ssh-key "ssh-ed25519 AAAA... you@host"
-
-bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh) \
-  debian 13 --username debian --password 'yourpass'
+bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)   debian 13 --username debian --password '你的密码'
 ```
 
-## 镜像下载加速
+## 装完怎么用
 
-安装器下载 qcow2 会自动挑更快的地址：**国内机器直接用加速站**（`mirror-one.losn.cc` → `mirror.drxian.qzz.io` → `v4.gh-proxy.org` → `axisnow.gh-proxy.org`，按顺序探测，第一个可用的胜出）；**海外机器先直连 GitHub，只有直连不通才退到加速站**。地区识别依次尝试 `api.ip.sb` → `ipinfo.io` → `qualcomm trace`，任一命中 CN 即算国内。探测会过滤 `text/html` 之类的伪 200 错误页，四站全挂时回落 GitHub 原地址。细节见 [`installer/MIRRORS.md`](installer/MIRRORS.md)。
+1. 等机器重启（一般 1～3 分钟）
+2. 用你设的密码或密钥 SSH 登录
+3. 默认用户：Ubuntu 镜像叫 `ubuntu`，Debian 镜像叫 `debian`，`sudo` 不用输密码
 
-## 装完之后
+```bash
+ssh ubuntu@你的服务器IP     # 装的是 Ubuntu
+ssh debian@你的服务器IP     # 装的是 Debian
+```
 
-- 默认用户：Ubuntu 镜像 `ubuntu`、Debian 镜像 `debian`，`sudo` 免密
-- 镜像内 `PasswordAuthentication yes`，但**没有预置密码**：不传 `--password` 就只能用密钥进（建议用 `--ssh-key`）
-- 网卡命名固定 `eth0`（`net.ifnames=0 biosdevname=0`），网络由 systemd-networkd 接管，另有一份 DHCP 兜底配置
-- cloud-init 只认 NoCloud / ConfigDrive，其他平台开机不会重复跑
+系统默认**没有预置密码**，所以安装时如果既没填密码也没加密钥，是登录不进去的——重装一次并设好密码即可。
 
-## 镜像里有什么
+## 装完就已经有的东西
 
-| 项 | 状态 |
+不用你动手，下面这些开箱就是好的：
+
+- **BBR 拥塞控制 + fq**：网络提速的标配，`sysctl net.ipv4.tcp_congestion_control` 能看到 `bbr`
+- **swap 自动分档**：按内存大小自动建（1G 内存建 2G，4G 内存建 4G，16G 以上不建），开机自动挂载
+- **国内软件源**：开机时自动判断机器在国内还是国外，国内的自动换成国内源
+- **自动对时**：`systemd-timesyncd` + 国内 NTP，时区 `Asia/Shanghai`
+- **文件句柄、连接数上限**：按服务器场景调过，不会动辄报 `too many open files`
+- **qemu-guest-agent**：云平台能看到虚拟机 IP 和状态
+- 常用工具：`curl wget git vim tmux htop rsync jq`
+
+## 系统里没有的东西
+
+按需求刻意没装，想要自己装：
+
+| 没有 | 怎么装 |
 |---|---|
-| snapd / `/snap` | **无**（Ubuntu 镜像也不带） |
-| nodejs / npm | **无**（自己 `apt install` 或 nvm） |
-| Docker | **无**（`WITH_DOCKER=1` 才装） |
-| nginx / apache / php / 数据库 | **无** |
-| linux-firmware | **无**（`WITH_FIRMWARE=1` 才装，物理机才需要） |
-| curl / wget / ca-certificates / openssh-server | **有** |
-| qemu-guest-agent | **有**（`WITH_QGA=0` 关） |
-| git / vim-tiny / htop / tmux / rsync / jq | **有**（`WITH_OPS=0` 关） |
-| 启动 | GPT + `bios_grub` + ESP + ext4，UEFI/BIOS 双启动；虚拟盘 10G，qcow2 压缩 |
+| snap / snapd | Ubuntu 镜像本来就不带，也不要装 |
+| Docker | `curl -fsSL https://get.docker.com \| sh` |
+| nodejs / npm | 用 nvm，或 `apt install nodejs npm` |
+| nginx / mysql / php | 自己 `apt install` |
+| linux-firmware | 虚拟机用不到；装物理机才需要 |
 
-## 四套镜像共同的优化
+## 关于下载速度
 
-- **文件句柄 / 进程**：`fs.file-max 2097152`、`fs.nr_open 1048576`，`nofile 65536/524288`（`*` 和 `root` 各一份，:root 登录不再只有 1024），systemd `DefaultLimitNOFILE=65536:1048576`
-- **网络**：BBR + fq、`tcp_mtu_probing=1`、`tcp_tw_reuse`、16MiB 收发缓冲、`somaxconn 4096`、`tcp_max_syn_backlog 8192`、端口范围 1024-65535、IP 转发
-- **内存/磁盘**：`swappiness 10`、`vfs_cache_pressure 50`、dirty 20/10、inotify 上限 524288
-- **时间**：`systemd-timesyncd` + 阿里/腾讯 NTP + `Asia/Shanghai`（安装器写死的 `Etc/UTC` 会被首启纠正）
-- **首启 `sf-firstboot`**（一次性，跑完写 `/var/lib/sf-firstboot.done` 并自我禁用）：
-  1. 按 `https://api.ip.sb/geoip` 识别地区：中国大陆→国内镜像源，其他→官方源（日志 `/var/log/sf-mirror.log`）
-  2. 按内存分档建 swap（<1G → ×2，1–2G → 2G，2–4G → 等内存，4–16G → 4G，≥16G 不建；带 512M–8G 上下限，写入 `/etc/fstab`）
-- 后台自动 apt / motd 广告定时器全部禁用并 mask
+安装器下载镜像时会**自动测速**：国内机器会把几个加速站各试一下（各拉 1MB 计时），挑最快那个下载；海外机器能直连 GitHub 就直连，直连不通才走加速站。四个加速站全挂时回落 GitHub 原地址，不会卡住。
 
-## 换源
+下载到的文件和官方发布的是同一个文件，校验值一致。
+
+## 常见问题
+
+**装完 ping 不通 / SSH 连不上？**
+先确认机器真的重启完成（云控制台看状态），再确认安装时设了密码或加了 SSH 密钥。想临时用 ping 排查，可以登录后在控制台里 `systemctl status ssh` 看 ssh 是否在跑。
+
+**想换软件源？**
+装完就有 `apt-mirror` 命令：
 
 ```bash
-apt-mirror                # 看可选源
-apt-mirror auto           # 按出口 IP 自动选（国内/海外）
-apt-mirror aliyun|tuna|ustc|huawei|official
+apt-mirror            # 看当前用的是哪个源
+apt-mirror auto       # 按所在地自动选
+apt-mirror aliyun     # 也可以指定：tuna / ustc / huawei / official
 ```
 
-Debian 会自动把安全源写成独立的 `security.debian.org/debian-security` stanza，Ubuntu 则三类 suite 同源。
+**时间不对？**
+镜像首启已经设好时区和自动对时；如果还不对，`timedatectl status` 看一下，`systemctl restart systemd-timesyncd` 重来一次。
 
-## 自己构建
+**安装中途 SSH 断了？**
+正常，安装器要往磁盘写系统，会重启。等几分钟重新连。
 
-```bash
-# Ubuntu 26.04 / 24.04
-cd distros/ubuntu && bash ./build.sh              # 默认 resolute（26.04）
-cd distros/ubuntu && SUITE=noble bash ./build.sh  # 24.04
+**能不能装别的系统（Arch / Alpine / CentOS）？**
+目前只做 Ubuntu 和 Debian。加新系统的方式见 [`docs/BUILD.md`](docs/BUILD.md)。
 
-# Debian 13 / 12
-cd distros/debian && SUITE=trixie bash ./build.sh   # 13
-cd distros/debian && SUITE=bookworm bash ./build.sh # 12
-```
+## 装完之后自检
 
-需要 `mmdebstrap / qemu-img / parted / dosfstools / e2fsprogs`；不是 root 或没有 mmdebstrap 会自动进容器构建（只需 docker）。常用开关：`WITH_OPS` `WITH_QGA` `WITH_DOCKER` `WITH_FIRMWARE` `SWAP_MODE` `IMG_SIZE` `MIRROR` `GUEST_MIRROR_CN`。
-
-## CI
-
-`.github/workflows/image-build.yml` 是 4 套矩阵（`ubuntu-26.04` / `ubuntu-24.04` / `debian-13` / `debian-12`）：
-
-1. `bash -n` 语法检查
-2. mmdebstrap 构 rootfs → 组 GPT 盘 → GRUB 双启动 → qcow2
-3. **真启动冒烟**：QEMU + OVMF 在 TCG 下开机，串口看到 cloud-init/login 才算过
-4. commit message 含 `[publish]` 才把产物发布到 `image-latest` Release
-
-`installer-contract.yml` 校验安装器：菜单渲染、`catalog` 字段完整、每个 URL HEAD 200、`reinstall.sh` / `trans.sh` 版本号一致。
-
-## 装机后自检
+不确定装得对不对，跑这个（不会改任何东西，只检查）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/tools/snapfree-check.sh | sudo bash
 ```
 
-## 目录
+它会检查：系统版本、BBR 是否生效、swap 是否挂上、软件源是否为国内源、SSH 是否在跑、时区对不对、各项内核参数、有没有混进 snap/docker。
 
-```
-catalog/catalog.tsv        镜像清单（菜单/安装器只认这里）
-installer/                 fork 的 reinstall（菜单 + 安装核心，trans.sh 未改）
-installer/MIRRORS.md       镜像下载加速规则与开关
-distros/ubuntu/            Ubuntu 26.04 / 24.04 构建套件
-distros/debian/            Debian 13 / 12 构建套件
-tools/snapfree-check.sh    装机后自检
-.github/workflows/         image-build（矩阵构建）/ installer-contract（契约测试）
-```
+## 想自己做镜像 / 改配置
 
-## 加一个发行版
-
-复制 `distros/debian` 成 `distros/<os>`，改 `conf.sh`（`SUITE`/`MIRROR`/`IMAGE_NAME`/`KEYRING_PKG`/`SECURITY_MIRROR`）、`packages.list`（内核元包名）、`hooks/10-prepare.sh` 里的源文件名与 keyring 路径，然后在 `catalog/catalog.tsv` 加一行、在 `image-build.yml` 的 matrix 里加一条即可。
+构建方式、CI、怎么加一个新发行版，全部在 [`docs/BUILD.md`](docs/BUILD.md)。
 
 ## 声明
 
-安装器是 [bin456789/reinstall](https://github.com/bin456789/reinstall) 的改造版（GPL-3.0，见 `installer/LICENSE`）：菜单换成仓库镜像选择，`setos_*` 里加了 catalog 校验，其余安装逻辑与上游一致。
+安装器改造自 [bin456789/reinstall](https://github.com/bin456789/reinstall)（GPL-3.0，见 `installer/LICENSE`）：菜单换成只选本仓库镜像，下载走测速选站，其余安装流程与上游一致。
