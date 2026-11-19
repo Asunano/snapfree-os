@@ -1,8 +1,8 @@
 [Unit]
-Description=snapfree-os first boot fixup (timezone, swap)
+Description=snapfree-os first boot fixup (timezone, apt mirror, swap)
 Documentation=man:systemd-firstboot(1)
-After=local-fs.target systemd-timesyncd.service
-Wants=systemd-timesyncd.service
+After=local-fs.target network-online.target systemd-timesyncd.service
+Wants=network-online.target systemd-timesyncd.service
 # 首启跑一次即可；失败允许后续启动重试
 ConditionPathExists=!/var/lib/sf-firstboot.done
 

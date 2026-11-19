@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 镜像内 apt 源切换工具
 #   apt-mirror                 列出可选镜像
+#   apt-mirror auto            按出口 IP 所在地区自动选源（国内/海外）
 #   apt-mirror aliyun          切换并 apt update
+#   apt-mirror official        换回 Ubuntu 官方源
 #   apt-mirror https://xxx/ubuntu   自定义源
 set -Eeuo pipefail
 
@@ -19,11 +21,17 @@ declare -A MIRRORS=(
 
 NAME="${1:-}"
 
+# auto：按出口 IP 所在地区自动选源（国内→阿里云，海外→官方源）
+if [ "$NAME" = "auto" ]; then
+  exec /usr/local/bin/sf-mirror-auto
+fi
+
 if [ -z "$NAME" ] || [ "$NAME" = "list" ] || [ "$NAME" = "--list" ]; then
   printf '可用镜像：\n'
   for k in aliyun tuna ustc huawei official azure; do
     printf '  %-9s %s\n' "$k" "${MIRRORS[$k]}"
   done
+  printf '  %-9s %s\n' auto "按出口 IP 自动选择（国内/海外）"
   printf '\n当前配置：\n'
   grep -E '^URIs:' "$SOURCES" 2>/dev/null || echo "  （找不到 $SOURCES）"
   exit 0
