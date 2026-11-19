@@ -120,20 +120,15 @@ sf_mirrors() {
 # 测速：拉 1MB 区间，返回字节/秒；拿不到或是错误页就失败
 # 很多代理会用 200 + text/html 返回错误页，所以要校验 content-type 与大小
 sf_mirror_speed() {
-    local _o _code _size _spd _ct
+    local _o
     _o=$(curl -sSL -o /dev/null --max-time 10 --connect-timeout 5 \
         -r 0-1048575 --max-filesize 4194304 \
         -w '%{http_code} %{size_download} %{speed_download} %{content_type}' "$1" 2>/dev/null) || return 1
-    _code=${_o%%%% *}
-    _o=${_o#* }
-    _size=${_o%%%% *}
-    _o=${_o#* }
-    _spd=${_o%%%% *}
-    _ct=${_o#* }
-    case "$_code" in 200 | 206) ;; *) return 1 ;; esac
-    case "$_ct" in *text/html*) return 1 ;; esac
-    [ "$_size" -ge 65536 ] 2>/dev/null || return 1
-    printf '%.0f\n' "$_spd"
+    printf '%s\n' "$_o" | awk '
+        $1 !~ /^(200|206)$/ { exit 1 }
+        $4 ~ /text\/html/ { exit 1 }
+        $2 < 65536 { exit 1 }
+        { printf "%.0f\n", $3 }'
 }
 
 sf_accel_is_cn() {
