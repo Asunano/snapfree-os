@@ -5,14 +5,18 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/conf.sh"
 
-IMG="$OUT_DIR/$IMAGE_NAME.qcow2"
 LOG="$WORK_DIR/serial.log"
 TIMEOUT="${SMOKE_TIMEOUT:-420}"
 
 # CI 里是干净 checkout，work/ 与 out/ 可能不存在
 mkdir -p "$WORK_DIR" "$OUT_DIR"
 
-[ -f "$IMG" ] || { echo "[!] 找不到 $IMG"; ls -lR "$OUT_DIR" 2>/dev/null; exit 1; }
+# 不传 SUITE 时 conf.sh 会按默认代号拼名字，所以这里以 out/ 里的实际产物为准
+IMG="$OUT_DIR/$IMAGE_NAME.qcow2"
+if [ ! -f "$IMG" ]; then
+  IMG=$(ls -1 "$OUT_DIR"/*.qcow2 2>/dev/null | head -n 1 || true)
+fi
+[ -n "${IMG:-}" ] && [ -f "$IMG" ] || { echo "[!] out/ 里没有 qcow2"; ls -lR "$OUT_DIR" 2>/dev/null; exit 1; }
 
 echo "镜像：$IMG（$(du -h "$IMG" | cut -f1)）"
 
@@ -65,5 +69,5 @@ else
   exit 1
 fi
 
-# 顺手确认 GRUB 确实写进去了
-grep -q 'Ubuntu 26.04 LTS' "$LOG" && echo "[+] GRUB 菜单品牌字段命中" || true
+# 顺手确认 GRUB 菜单确实写进去了
+grep -qE 'Ubuntu [0-9]|Debian GNU/Linux' "$LOG" && echo '[+] GRUB 菜单品牌字段命中' || true
