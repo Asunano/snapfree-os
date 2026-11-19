@@ -26,7 +26,8 @@ gzip -dc "$IDX" > "$IDX_TXT"
 [ -s "$IDX_TXT" ] || { echo "[!] 索引解压失败" >&2; exit 1; }
 
 PKG=""
-for cand in ubuntu-keyring debian-archive-keyring; do
+for cand in ${KEYRING_PKG:-} ubuntu-keyring debian-archive-keyring; do
+  [ -n "$cand" ] || continue
   if grep -qx "Package: $cand" "$IDX_TXT"; then
     PKG="$cand"
     break

@@ -12,11 +12,13 @@ _as_bool(){ case "${1:-}" in true|TRUE|True|yes|YES|1) echo 1 ;; *) echo 0 ;; es
 export SUITE="${SUITE:-trixie}"
 export MIRROR="${MIRROR:-http://deb.debian.org/debian}"
 export GUEST_MIRROR="${GUEST_MIRROR:-http://deb.debian.org/debian}"
-export GUEST_MIRROR_CN="${GUEST_MIRROR_CN:-https://mirrors.aliyun.com/debian}"
+export GUEST_MIRROR_CN="${GUEST_MIRROR_CN:-https://mirrors.ustc.edu.cn/debian}"
 export GUEST_MIRROR_DEFAULT="${GUEST_MIRROR_DEFAULT:-http://deb.debian.org/debian}"
 export MIRROR_AUTO="${MIRROR_AUTO:-1}"
 export ARCH="${ARCH:-amd64}"
 export KEYRING="${KEYRING:-}"
+export KEYRING_PKG="${KEYRING_PKG:-debian-archive-keyring}"
+export SECURITY_MIRROR="${SECURITY_MIRROR:-https://security.debian.org/debian-security}"
 
 # ---- 产物 ----
 export OUT_DIR="${OUT_DIR:-$KIT_DIR/out}"
