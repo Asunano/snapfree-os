@@ -42,6 +42,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/ins
   debian 13 --username debian --password 'yourpass'
 ```
 
+## 镜像下载加速
+
+安装器下载 qcow2 会自动挑更快的地址：**国内机器直接用加速站**（`mirror-one.losn.cc` → `mirror.drxian.qzz.io` → `v4.gh-proxy.org` → `axisnow.gh-proxy.org`，按顺序探测，第一个可用的胜出）；**海外机器先直连 GitHub，只有直连不通才退到加速站**。地区识别依次尝试 `api.ip.sb` → `ipinfo.io` → `qualcomm trace`，任一命中 CN 即算国内。探测会过滤 `text/html` 之类的伪 200 错误页，四站全挂时回落 GitHub 原地址。细节见 [`installer/MIRRORS.md`](installer/MIRRORS.md)。
+
 ## 装完之后
 
 - 默认用户：Ubuntu 镜像 `ubuntu`、Debian 镜像 `debian`，`sudo` 免密
@@ -120,6 +124,7 @@ curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/tools/snap
 ```
 catalog/catalog.tsv        镜像清单（菜单/安装器只认这里）
 installer/                 fork 的 reinstall（菜单 + 安装核心，trans.sh 未改）
+installer/MIRRORS.md       镜像下载加速规则与开关
 distros/ubuntu/            Ubuntu 26.04 / 24.04 构建套件
 distros/debian/            Debian 13 / 12 构建套件
 tools/snapfree-check.sh    装机后自检
