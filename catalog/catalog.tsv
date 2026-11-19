@@ -1,4 +1,6 @@
 # 镜像清单（唯一真源）：菜单/安装器只认这里的条目
 # 字段：id|distro|release|arch|variant|name|size|url|sha256
-# arch 用 any 表示不区分架构
 ubuntu-26.04-server-snapfree|ubuntu|26.04|x86_64|server|Ubuntu 26.04 LTS 无 snap 服务器镜像|1.2G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-26.04-server-snapfree-amd64.qcow2|-
+ubuntu-24.04-server-snapfree|ubuntu|24.04|x86_64|server|Ubuntu 24.04 LTS 无 snap 服务器镜像|1.1G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-24.04-server-snapfree-amd64.qcow2|-
+debian-13-server-snapfree|debian|13|x86_64|server|Debian 13 (trixie) 纯净服务器镜像|350M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2|-
+debian-12-server-snapfree|debian|12|x86_64|server|Debian 12 (bookworm) 纯净服务器镜像|380M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-12-server-snapfree-amd64.qcow2|-
