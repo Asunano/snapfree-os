@@ -43,6 +43,7 @@ cloud-guest-utils
 # 时间同步与 DNS：Debian 的 timesyncd / resolved 都是独立包，不装就没有对应服务
 systemd-timesyncd
 systemd-resolved
+debian-archive-keyring
 
 # ---- 启动链 ----
 grub-common

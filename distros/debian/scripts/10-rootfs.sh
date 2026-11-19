@@ -36,7 +36,8 @@ MMD=(mmdebstrap
   --customize-hook="bash '$HERE/hooks/99-cleanup.sh' \"\$1\""
 )
 # 宿主 keyring 不是目标发行版时必须显式指定，否则 apt 验签直接失败
-[ -n "${KEYRING:-}" ] && MMD+=(--keyring="$KEYRING")
+# 另外显式指向 Dir::Etc::Trusted：某些 apt/mmdebstrap 组合下仅靠 --keyring 仍会报 NO_PUBKEY
+[ -n "${KEYRING:-}" ] && MMD+=(--keyring="$KEYRING" --aptopt="Dir::Etc::Trusted=$KEYRING")
 
 log "包数量：$(printf '%s' "$PKGS" | tr ',' '\n' | wc -l)（ops=$WITH_OPS qga=$WITH_QGA firmware=$WITH_FIRMWARE）"
 log "开始下载并解压（首次约 400-600MB，视网络 5-20 分钟）"
