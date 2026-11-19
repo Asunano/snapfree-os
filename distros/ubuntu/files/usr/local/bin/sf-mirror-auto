@@ -3,11 +3,11 @@
 #  按机器所在地区自动选择 apt 源
 #    - 出口 IP 在中国大陆 -> 走国内镜像（默认阿里云）
 #    - 其它地区        -> 走 Ubuntu 官方源（海外访问官方更快）
-#  识别手段：ip.sb 的 geoip 接口，失败时依次降级到 ip.sb 纯文本端点、
-#  ipinfo.io；再失败就保持当前源不变（不阻断启动）。
+#  识别手段：ip.sb 的 geoip 接口，失败时依次降级到 ipinfo.io，
+#  再失败就保持当前源不变（不阻断启动）。
 #
 #  手动覆盖：/etc/sf-image.conf 里 MIRROR_AUTO=0 即关闭自动切换
-#  单独执行：sudo sf-mirror-auto  （或 sudo apt-mirror auto）
+#  单独执行：sudo sf-mirror-auto  或  sudo apt-mirror auto
 # ============================================================
 set -Eeuo pipefail
 
@@ -26,13 +26,11 @@ curl_q(){ curl -fsS --max-time 6 --retry 1 -A "snapfree-os/1.0" "$1" 2>/dev/null
 
 # ---------- 识别地区 ----------
 detect(){
-  local cc="" j=""
+  local cc="" j
   # 1) ip.sb geoip（JSON）
   j=$(curl_q https://api.ip.sb/geoip) || j=""
   if [ -n "$j" ]; then
-    cc=$(printf '%s' "$j" | sed -n 's/.*"country_code"[[:space:]]*:[[:space:]]*"([A-Za-z]*)".*/\1/p')
-    cc=$(printf '%s' "$j" | grep -o '"country_code"[[:space:]]*:[[:space:]]*"[A-Za-z]\{2\}"' | head -1 | sed 's/.*"(.*)"$/\1/')
-    cc=$(printf '%s' "$j" | awk -F'"country_code":"' 'NF>1{split($2,a,"\""); print a[1]; exit}')
+    cc=$(printf '%s' "$j" | sed -n 's/.*"country_code"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p')
   fi
   # 2) ip.sb 纯文本 geoip 端点
   if [ -z "$cc" ]; then
