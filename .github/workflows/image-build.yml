@@ -1,0 +1,220 @@
+# image-build：一次构建四套无 snap 服务器镜像（ubuntu 26.04/24.04、debian 13/12）
+# 每套镜像独立构建（各自 distros/<distro> 套件），但共用同一套优化：
+#   BBR+fq、limits/handles、timesyncd+时区、首启自动换源、按内存分档 swap、纯净包清单
+name: image-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'distros/**'
+      - 'catalog/**'
+      - '.github/workflows/image-build.yml'
+    tags: ['v*']
+  schedule:
+    - cron: '0 18 1 * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: image-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: ubuntu-26.04
+            distro: ubuntu
+            suite: resolute
+            mirror: http://archive.ubuntu.com/ubuntu
+            guest_cn: https://mirrors.aliyun.com/ubuntu
+          - id: ubuntu-24.04
+            distro: ubuntu
+            suite: noble
+            mirror: http://archive.ubuntu.com/ubuntu
+            guest_cn: https://mirrors.aliyun.com/ubuntu
+          - id: debian-13
+            distro: debian
+            suite: trixie
+            mirror: http://deb.debian.org/debian
+            guest_cn: https://mirrors.aliyun.com/debian
+          - id: debian-12
+            distro: debian
+            suite: bookworm
+            mirror: http://deb.debian.org/debian
+            guest_cn: https://mirrors.aliyun.com/debian
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: bash 语法检查
+        working-directory: distros/${{ matrix.distro }}
+        run: |
+          set -euo pipefail
+          for f in build.sh conf.sh hooks/*.sh scripts/*.sh; do
+            bash -n "$f"
+            echo "ok  $f"
+          done
+
+      - name: 释放磁盘空间
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                       /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h /
+
+      - name: 安装构建依赖
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            mmdebstrap qemu-utils dosfstools parted gdisk e2fsprogs util-linux
+          mmdebstrap --version
+
+      - name: 构建 qcow2（${{ matrix.id }}）
+        shell: bash
+        working-directory: distros/${{ matrix.distro }}
+        env:
+          IN_SUITE: ${{ matrix.suite }}
+          IN_MIRROR: ${{ matrix.mirror }}
+          IN_GUEST_CN: ${{ matrix.guest_cn }}
+        run: |
+          set -euo pipefail
+          echo "suite=$IN_SUITE mirror=$IN_MIRROR guest_cn=$IN_GUEST_CN"
+          sudo env \
+            SUITE="$IN_SUITE" \
+            MIRROR="$IN_MIRROR" \
+            GUEST_MIRROR="$IN_MIRROR" \
+            GUEST_MIRROR_CN="$IN_GUEST_CN" \
+            GUEST_MIRROR_DEFAULT="$IN_MIRROR" \
+            MIRROR_AUTO=1 \
+            SWAP_MODE=auto \
+            WITH_DOCKER=0 \
+            WITH_OPS=1 \
+            WITH_QGA=1 \
+            WITH_FIRMWARE=0 \
+            bash ./build.sh 2>&1 | tee build.log
+
+      - name: 写入任务摘要
+        if: always()
+        shell: bash
+        working-directory: distros/${{ matrix.distro }}
+        run: |
+          {
+            echo "### ${{ matrix.id }}"
+            echo
+            if ls out/*.qcow2 >/dev/null 2>&1; then
+              echo "| 文件 | 大小 | SHA256 |"
+              echo "|---|---|---|"
+              for f in out/*.qcow2; do
+                echo "| $(basename "$f") | $(du -h "$f" | cut -f1) | $(sha256sum "$f" | cut -d' ' -f1) |"
+              done
+            else
+              echo "失败：没有产物，见 build.log"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 qcow2
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcow2-${{ matrix.id }}-${{ github.run_number }}
+          path: |
+            distros/${{ matrix.distro }}/out/*.qcow2
+            distros/${{ matrix.distro }}/out/*.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.id }}-${{ github.run_number }}
+          path: distros/${{ matrix.distro }}/build.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: ubuntu-26.04
+            distro: ubuntu
+          - id: ubuntu-24.04
+            distro: ubuntu
+          - id: debian-13
+            distro: debian
+          - id: debian-12
+            distro: debian
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 QEMU + OVMF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf
+          ls /usr/share/OVMF/
+
+      - name: 取 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          name: qcow2-${{ matrix.id }}-${{ github.run_number }}
+          path: distros/${{ matrix.distro }}/out
+
+      - name: 冒烟启动（TCG 无 KVM）
+        working-directory: distros/${{ matrix.distro }}
+        env:
+          SMOKE_TIMEOUT: '600'
+        run: |
+          set -euo pipefail
+          sudo -E bash ./scripts/smoke-test.sh
+
+      - name: 上传串口日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-log-${{ matrix.id }}-${{ github.run_number }}
+          path: distros/${{ matrix.distro }}/work/serial.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  publish-latest:
+    needs: [build, smoke]
+    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish]')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 取全部 qcow2
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: 写入到 image-latest Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          find dist -type f | sort
+          mapfile -t FILES < <(find dist -type f \( -name '*.qcow2' -o -name '*.sha256' \) | sort)
+          [ "${#FILES[@]}" -gt 0 ] || { echo '没有可发布的产物'; exit 1; }
+          if gh release view image-latest >/dev/null 2>&1; then
+            gh release upload image-latest "${FILES[@]}" --clobber
+          else
+            gh release create image-latest "${FILES[@]}" \
+              --target "$GITHUB_SHA" \
+              --title 'snapfree-os latest' \
+              --notes '仓库内镜像的 latest 发布（由 Actions 自动发布）。'
+          fi
+          gh release edit image-latest --latest
