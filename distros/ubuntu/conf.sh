@@ -13,8 +13,13 @@ _as_bool(){ case "${1:-}" in true|TRUE|True|yes|YES|1) echo 1 ;; *) echo 0 ;; es
 # ---- 发行版 / 源 ----
 export SUITE="${SUITE:-resolute}"
 export MIRROR="${MIRROR:-http://archive.ubuntu.com/ubuntu}"
-# 写进镜像的源（可与构建源不同：CI 在海外用官方源构建，装机在国内用阿里云）
-export GUEST_MIRROR="${GUEST_MIRROR:-https://mirrors.aliyun.com/ubuntu}"
+# 写进镜像的 apt 源（可与构建源不同）
+# MIRROR_AUTO=1 时，首启会按出口 IP 所在地区自动选：
+#   中国大陆 -> GUEST_MIRROR_CN；其它地区 -> GUEST_MIRROR_DEFAULT
+export GUEST_MIRROR="${GUEST_MIRROR:-http://archive.ubuntu.com/ubuntu}"
+export GUEST_MIRROR_CN="${GUEST_MIRROR_CN:-https://mirrors.aliyun.com/ubuntu}"
+export GUEST_MIRROR_DEFAULT="${GUEST_MIRROR_DEFAULT:-http://archive.ubuntu.com/ubuntu}"
+export MIRROR_AUTO="${MIRROR_AUTO:-1}"
 export ARCH="${ARCH:-amd64}"
 # 宿主 keyring 与目标发行版不匹配时，由 scripts/fetch-keyring.sh 填充
 export KEYRING="${KEYRING:-}"
@@ -41,8 +46,8 @@ export USER_NAME="${USER_NAME:-ubuntu}"
 export USER_PASSWORD="${USER_PASSWORD:-}"        # 留空 = 不设密码
 export SSH_PASSWORD_AUTH="${SSH_PASSWORD_AUTH:-yes}"
 export GRUB_ID="${GRUB_ID:-ubuntu}"
-# 首启自动建 swapfile 的上限（MB，0 = 不建）；实际取 min(该值, 内存的一半)
-export SWAP_MIN_MB="${SWAP_MIN_MB:-2048}"
+# swap 策略：auto = 按内存分档自动建；none/0 = 不建；数字 = 固定 MiB
+export SWAP_MODE="${SWAP_MODE:-auto}"
 
 # ---- 组件开关 ----
 export WITH_DOCKER="${WITH_DOCKER:-0}"           # Docker CE（默认关闭，纯净系统；需要时 WITH_DOCKER=1）
@@ -60,3 +65,4 @@ export WITH_OPS="$(_as_bool "$WITH_OPS")"
 export WITH_QGA="$(_as_bool "$WITH_QGA")"
 export WITH_FIRMWARE="$(_as_bool "$WITH_FIRMWARE")"
 export QCOW2_COMPRESS="$(_as_bool "$QCOW2_COMPRESS")"
+export MIRROR_AUTO="$(_as_bool "$MIRROR_AUTO")"

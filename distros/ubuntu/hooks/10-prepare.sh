@@ -6,7 +6,10 @@ set -Eeuo pipefail
 ROOT="${1:?需要 rootfs 路径}"
 KIT_DIR="${KIT_DIR:?KIT_DIR 未导出}"
 export DEBIAN_FRONTEND=noninteractive
-SWAP_MIN_MB="${SWAP_MIN_MB:-2048}"
+SWAP_MODE="${SWAP_MODE:-auto}"
+MIRROR_AUTO="${MIRROR_AUTO:-1}"
+GUEST_MIRROR_CN="${GUEST_MIRROR_CN:-https://mirrors.aliyun.com/ubuntu}"
+GUEST_MIRROR_DEFAULT="${GUEST_MIRROR_DEFAULT:-http://archive.ubuntu.com/ubuntu}"
 
 log(){ printf '  · %s\n' "$*"; }
 
@@ -19,14 +22,17 @@ for d in dev dev/pts proc sys; do ensure "$d"; done
 
 # ---------- 静态文件 ----------
 cp -a "$KIT_DIR/files/." "$ROOT/"
-chmod 0755 "$ROOT/usr/local/bin/apt-mirror" "$ROOT/usr/local/bin/sf-firstboot"
+chmod 0755 "$ROOT/usr/local/bin/apt-mirror" "$ROOT/usr/local/bin/sf-firstboot" "$ROOT/usr/local/bin/sf-mirror-auto"
 
 # ---------- 镜像参数（首启脚本读它） ----------
 mkdir -p "$ROOT/etc"
 cat > "$ROOT/etc/sf-image.conf" <<EOF
 # snapfree-os 镜像参数（首启一次性任务读取）
 TIMEZONE=$TIMEZONE
-SWAP_MIN_MB=$SWAP_MIN_MB
+SWAP_MODE=$SWAP_MODE
+MIRROR_AUTO=$MIRROR_AUTO
+MIRROR_CN=$GUEST_MIRROR_CN
+MIRROR_DEFAULT=$GUEST_MIRROR_DEFAULT
 EOF
 
 # ---------- 主机名 / 时区 ----------
@@ -51,7 +57,7 @@ else
   log "兜底 DNS 沿用 DHCP 下发"
 fi
 
-# ---------- apt：写入镜像源（可与构建源不同）+ 关掉 snapd ----------
+# ---------- apt：写入镜像源（首启会按地区自动切换） ----------
 mkdir -p "$ROOT/etc/apt/sources.list.d" "$ROOT/etc/apt/preferences.d"
 cat > "$ROOT/etc/apt/sources.list.d/ubuntu.sources" <<EOF
 Types: deb
@@ -61,7 +67,7 @@ Components: main universe
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
 rm -f "$ROOT/etc/apt/sources.list"
-log "镜像内源：$GUEST_MIRROR（可用 apt-mirror 切换）"
+log "镜像内默认源：$GUEST_MIRROR（首启按出口 IP 自动切：国内→$GUEST_MIRROR_CN）"
 
 if [ ! -f "$ROOT/usr/share/keyrings/ubuntu-archive-keyring.gpg" ]; then
   log "warn: 缺 ubuntu-archive-keyring.gpg，镜像内 apt 可能报 NO_PUBKEY"
@@ -193,4 +199,13 @@ fi
 if [ ! -e "$ROOT/etc/systemd/system.conf.d/99-limits.conf" ]; then
   printf '[!] 缺 systemd 默认 ulimit 配置\n' >&2; exit 1
 fi
-log "校验通过：无 snapd，无 /snap，netplan 无重复定义，兜底网络就位，timesyncd 已装，首启修正单元就位"
+if [ ! -x "$ROOT/usr/local/bin/sf-mirror-auto" ] || [ ! -x "$ROOT/usr/local/bin/sf-firstboot" ]; then
+  printf '[!] 首启脚本缺失或不可执行（时区/换源/swap 不会生效）\n' >&2; exit 1
+fi
+if ! grep -qs '^URIs:' "$ROOT/etc/apt/sources.list.d/ubuntu.sources"; then
+  printf '[!] 镜像内 apt 源未写入\n' >&2; exit 1
+fi
+if ! grep -qs 'tcp_congestion_control = bbr' "$ROOT/etc/sysctl.d/99-server.conf"; then
+  printf '[!] 缺少 BBR 配置\n' >&2; exit 1
+fi
+log "校验通过：无 snapd，无 /snap，netplan 无重复定义，兜底网络就位，timesyncd 已装，首启修正与自动换源就位，BBR 配置在位"
