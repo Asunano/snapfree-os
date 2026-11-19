@@ -9,7 +9,6 @@ on:
     branches: [main]
     paths:
       - 'distros/**'
-      - 'catalog/**'
       - '.github/workflows/image-build.yml'
     tags: ['v*']
   schedule:
@@ -44,12 +43,12 @@ jobs:
             distro: debian
             suite: trixie
             mirror: http://deb.debian.org/debian
-            guest_cn: https://mirrors.aliyun.com/debian
+            guest_cn: https://mirrors.ustc.edu.cn/debian
           - id: debian-12
             distro: debian
             suite: bookworm
             mirror: http://deb.debian.org/debian
-            guest_cn: https://mirrors.aliyun.com/debian
+            guest_cn: https://mirrors.ustc.edu.cn/debian
     steps:
       - uses: actions/checkout@v5
 
