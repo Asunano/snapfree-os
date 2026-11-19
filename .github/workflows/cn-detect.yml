@@ -1,0 +1,23 @@
+name: cn-detect
+on:
+  push:
+    paths: ['tools/cn.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tools/fix-cn-detect.py
+      - run: |
+          set -euo pipefail
+          bash -n installer/reinstall.sh
+          git config user.name 'snapfree-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add -A
+          git commit -m '[mirror] 国内判定加多级兜底（ip.sb -\u003e ipinfo -\u003e qualcomm trace）' || echo no-change
+          git push
