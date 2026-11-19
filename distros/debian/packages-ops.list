@@ -1,0 +1,12 @@
+# 运维工具层（默认装，WITH_OPS=0 关闭，约省 40MB）
+git
+vim-tiny
+htop
+tmux
+rsync
+jq
+unzip
+xz-utils
+zstd
+ethtool
+netcat-openbsd

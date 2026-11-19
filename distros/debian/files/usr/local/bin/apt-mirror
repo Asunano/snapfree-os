@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# 镜像内 apt 源切换工具（Ubuntu / Debian 通用）
+#   apt-mirror                 列出可选镜像
+#   apt-mirror auto            按出口 IP 所在地区自动选源（国内/海外）
+#   apt-mirror aliyun          切换并 apt update
+#   apt-mirror official        换回官方源
+#   apt-mirror https://xxx/xxx 自定义源
+set -Eeuo pipefail
+
+[ "$(id -u)" -eq 0 ] || { echo "需要 root：sudo apt-mirror ..."; exit 1; }
+
+SOURCES=""
+for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/debian.sources; do
+  [ -f "$f" ] && { SOURCES="$f"; break; }
+done
+[ -n "$SOURCES" ] || { echo "找不到 deb822 源文件（ubuntu.sources / debian.sources）" >&2; exit 1; }
+
+ID=$(. /etc/os-release; printf '%s' "${ID:-ubuntu}")
+SUB=ubuntu
+KEYRING=/usr/share/keyrings/ubuntu-archive-keyring.gpg
+DEF_COMPONENTS="main universe"
+DEF_OFFICIAL="http://archive.ubuntu.com/ubuntu"
+if [ "$ID" = debian ]; then
+  SUB=debian
+  KEYRING=/usr/share/keyrings/debian-archive-keyring.gpg
+  DEF_COMPONENTS="main contrib non-free-firmware"
+  DEF_OFFICIAL="http://deb.debian.org/debian"
+fi
+
+declare -A MIRRORS=(
+  [aliyun]="https://mirrors.aliyun.com/$SUB"
+  [tuna]="https://mirrors.tuna.tsinghua.edu.cn/$SUB"
+  [ustc]="https://mirrors.ustc.edu.cn/$SUB"
+  [huawei]="https://repo.huaweicloud.com/$SUB"
+  [official]="$DEF_OFFICIAL"
+)
+if [ "$SUB" = ubuntu ]; then MIRRORS[azure]="http://azure.archive.ubuntu.com/ubuntu"; fi
+
+NAME="${1:-}"
+if [ "$NAME" = "auto" ]; then exec /usr/local/bin/sf-mirror-auto; fi
+if [ -z "$NAME" ] || [ "$NAME" = "list" ] || [ "$NAME" = "--list" ]; then
+  printf '可用镜像（%s）：\n' "$SUB"
+  for k in "${!MIRRORS[@]}"; do printf '  %-9s %s\n' "$k" "${MIRRORS[$k]}"; done | sort
+  printf '  %-9s %s\n' auto "按出口 IP 自动选择（国内/海外）"
+  printf '\n当前配置（%s）：\n' "$SOURCES"
+  grep -E '^URIs:' "$SOURCES" 2>/dev/null || echo '  （未找到 URIs）'
+  exit 0
+fi
+
+if [ -n "${MIRRORS[$NAME]:-}" ]; then URI="${MIRRORS[$NAME]}"
+elif [[ "$NAME" == http* ]]; then URI="${NAME%/}"
+else echo "未知镜像：$NAME（先用 apt-mirror 看列表）" >&2; exit 1
+fi
+
+SUITE=$(awk '/^Suites:/{print $2; exit}' "$SOURCES" 2>/dev/null || true)
+[ -n "$SUITE" ] || SUITE=$(. /etc/os-release; printf '%s' "${VERSION_CODENAME:-}")
+COMPONENTS=$(awk '/^Components:/{sub(/^Components:[[:space:]]*/,""); print; exit}' "$SOURCES" 2>/dev/null || true)
+[ -n "$COMPONENTS" ] || COMPONENTS="$DEF_COMPONENTS"
+SIGNED_BY=$(awk '/^Signed-By:/{sub(/^Signed-By:[[:space:]]*/,""); print; exit}' "$SOURCES" 2>/dev/null || true)
+[ -n "$SIGNED_BY" ] || SIGNED_BY="$KEYRING"
+
+BACKUP=$(mktemp)
+cp "$SOURCES" "$BACKUP"
+cat > "$SOURCES" <<EOF
+Types: deb
+URIs: $URI
+Suites: $SUITE $SUITE-updates $SUITE-security
+Components: $COMPONENTS
+Signed-By: $SIGNED_BY
+EOF
+
+echo "切换至 $URI（$SUITE / $COMPONENTS）"
+if ! apt-get update -q; then
+  echo '更新失败，回滚原配置' >&2
+  cp "$BACKUP" "$SOURCES"
+  rm -f "$BACKUP"
+  exit 1
+fi
+rm -f "$BACKUP"
+echo '完成。'

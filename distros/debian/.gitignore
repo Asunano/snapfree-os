@@ -1,0 +1,11 @@
+# 构建产物
+out/
+work/
+build.log
+*.log
+
+# 本地测试残留
+*.qcow2
+*.raw
+seed.iso
+OVMF_VARS.fd

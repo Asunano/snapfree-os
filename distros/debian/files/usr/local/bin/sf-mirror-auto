@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ============================================================
+#  按机器所在地区自动选择 apt 源
+#    - 出口 IP 在中国大陆 -> 走国内镜像（默认阿里云）
+#    - 其它地区        -> 走 Ubuntu 官方源（海外访问官方更快）
+#  识别手段：ip.sb 的 geoip 接口，失败时依次降级到 ipinfo.io，
+#  再失败就保持当前源不变（不阻断启动）。
+#
+#  手动覆盖：/etc/sf-image.conf 里 MIRROR_AUTO=0 即关闭自动切换
+#  单独执行：sudo sf-mirror-auto  或  sudo apt-mirror auto
+# ============================================================
+set -Eeuo pipefail
+
+CONF=/etc/sf-image.conf
+cfg(){ awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$CONF" 2>/dev/null; }
+
+MIRROR_AUTO=$(cfg MIRROR_AUTO); MIRROR_AUTO="${MIRROR_AUTO:-1}"
+MIRROR_CN=$(cfg MIRROR_CN); MIRROR_CN="${MIRROR_CN:-https://mirrors.aliyun.com/debian}"
+MIRROR_DEFAULT=$(cfg MIRROR_DEFAULT); MIRROR_DEFAULT="${MIRROR_DEFAULT:-http://deb.debian.org/debian}"
+STATE=/var/lib/sf-mirror.state
+
+[ "$MIRROR_AUTO" = "1" ] || { echo "MIRROR_AUTO=0，跳过自动换源"; exit 0; }
+[ "$(id -u)" -eq 0 ] || { echo "需要 root" >&2; exit 1; }
+
+curl_q(){ curl -fsS --max-time 6 --retry 1 -A "snapfree-os/1.0" "$1" 2>/dev/null; }
+
+# ---------- 识别地区 ----------
+detect(){
+  local cc="" j
+  # 1) ip.sb geoip（JSON）
+  j=$(curl_q https://api.ip.sb/geoip) || j=""
+  if [ -n "$j" ]; then
+    cc=$(printf '%s' "$j" | sed -n 's/.*"country_code"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p')
+  fi
+  # 2) ip.sb 纯文本 geoip 端点
+  if [ -z "$cc" ]; then
+    cc=$(curl_q https://ip.sb/geoip | tr -d '[:space:]' | tr 'a-z' 'A-Z' || true)
+    case "$cc" in CN*|*CHINA) cc=CN ;; *) cc="" ;; esac
+  fi
+  # 3) 最后降级到 ipinfo
+  if [ -z "$cc" ]; then
+    cc=$(curl_q https://ipinfo.io/country | tr -d '[:space:]' | tr 'a-z' 'A-Z' || true)
+  fi
+  printf '%s' "$cc"
+}
+
+CC=$(detect)
+echo "识别结果：country_code=${CC:-未知}"
+
+if [ -z "$CC" ]; then
+  echo "地区识别失败，保持当前 apt 源不变"
+  exit 0
+fi
+
+if [ "$CC" = "CN" ]; then
+  TARGET="$MIRROR_CN"; KIND=cn
+else
+  TARGET="$MIRROR_DEFAULT"; KIND=intl
+fi
+
+CUR=$(awk '/^URIs:/{print $2; exit}' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true)
+if [ "$CUR" = "$TARGET" ]; then
+  echo "当前源已是 $TARGET，无需切换"
+  printf '%s %s\n' "$KIND" "$CC" > "$STATE"
+  exit 0
+fi
+
+# 走 apt-mirror 完成实际写入 + apt update（失败会自动回滚）
+if /usr/local/bin/apt-mirror "$TARGET" >/dev/null 2>&1; then
+  echo "已切换到 $TARGET（${KIND}）"
+  printf '%s %s\n' "$KIND" "$CC" > "$STATE"
+else
+  echo "切换失败，保持原源" >&2
+  exit 1
+fi

@@ -1757,8 +1757,15 @@ Continue?
         fi
 
         if is_use_cloud_image; then
-            # cloud image
+            # [snapfree] 只允许仓库 catalog 内的镜像
             if [ -z "$img" ]; then
+                img=$(sf_lookup_img debian "$releasever")
+            fi
+            if [ -z "$img" ]; then
+                error_and_exit "仓库中没有 debian $releasever 的镜像。\n运行 $reinstall_____ 查看镜像菜单。"
+            fi
+            # cloud image
+            if false; then
                 # https://salsa.debian.org/cloud-team/debian-cloud-images/-/tree/master/config_space/bookworm/files/etc/default/grub.d
                 # cloud 包括各种奇怪的优化，例如不显示 grub 菜单
                 # 因此使用 nocloud
@@ -5409,7 +5416,7 @@ fi
 # [snapfree] 无参数启动 = 镜像菜单（只能选本仓库镜像）
 if [ $# -eq 0 ]; then
     sf_menu
-    set -- --img "$sf_sel_img" -- "$sf_sel_distro" "$sf_sel_release"
+    set -- --img "$sf_sel_img" --ci -- "$sf_sel_distro" "$sf_sel_release"
 fi
 
 # 整理参数
