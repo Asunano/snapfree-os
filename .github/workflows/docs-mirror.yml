@@ -1,0 +1,23 @@
+name: docs-mirror
+on:
+  push:
+    paths: ['tools/docs.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tools/docs-mirror.py
+      - run: |
+          set -euo pipefail
+          bash -n installer/reinstall.sh
+          git config user.name 'snapfree-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: 镜像下载加速说明 + 清理一次性脚手架' || echo no-change
+          git push
