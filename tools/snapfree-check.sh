@@ -67,10 +67,12 @@ sec "1. 系统身份"
 if [ -r /etc/os-release ]; then
   . /etc/os-release
   info "发行版：${PRETTY_NAME:-未知}  代号：${VERSION_CODENAME:-?}"
-  case "${VERSION_CODENAME:-}" in
-    resolute) ok "确认为 Ubuntu 26.04 LTS（resolute）" ;;
-    noble)    ok "确认为 Ubuntu 24.04 LTS（noble）" ;;
-    *)        warn "非预期代号：${VERSION_CODENAME:-?}（自己改的就忽略）" ;;
+  case "${ID:-}:${VERSION_CODENAME:-}" in
+    ubuntu:resolute)  ok "确认为 Ubuntu 26.04 LTS（resolute）" ;;
+    ubuntu:noble)     ok "确认为 Ubuntu 24.04 LTS（noble）" ;;
+    debian:trixie)    ok "确认为 Debian 13（trixie）" ;;
+    debian:bookworm)  ok "确认为 Debian 12（bookworm）" ;;
+    *)                warn "非预期发行版/代号：${ID:-?}:${VERSION_CODENAME:-?}（自己改的就忽略）" ;;
   esac
 else
   bad "缺 /etc/os-release"
@@ -351,12 +353,17 @@ fi
 
 # ---------------------------------------------------------------- 15 apt
 sec "15. apt 源与包状态"
-if [ -r /etc/apt/sources.list.d/ubuntu.sources ]; then
-  URIS=$(awk -F': ' '/^URIs:/{print $2}' /etc/apt/sources.list.d/ubuntu.sources | tr '\n' ' ')
-  info "镜像源：${URIS:-?}"
-  echo "$URIS" | grep -q 'mirrors.aliyun.com' && ok "使用国内阿里云源" || info "非阿里云源（自己换过就忽略）"
+SRC=""
+for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/debian.sources; do
+  [ -r "$f" ] && { SRC="$f"; break; }
+done
+if [ -n "$SRC" ]; then
+  URIS=$(awk -F': ' '/^URIs:/{print $2}' "$SRC" | tr '\n' ' ')
+  info "镜像源（$SRC）：${URIS:-?}"
+  echo "$URIS" | grep -qE 'mirrors\.aliyun\.com|mirrors\.ustc\.edu\.cn|tuna\.tsinghua' && ok "使用国内镜像源" || info "非国内源（自己换过就忽略）"
+  awk '/^URIs:/{u=$2} /^Suites:/{print u" "$2}' "$SRC" | grep -q 'security' && info "已配置 security suite"
 else
-  warn "缺 /etc/apt/sources.list.d/ubuntu.sources（源可能被手动改过）"
+  warn "缺 deb822 源文件（ubuntu.sources / debian.sources，源可能被手动改过）"
 fi
 apt-get check -q >/dev/null 2>&1 && ok "apt 依赖关系一致" || bad "apt-get check 报依赖破损"
 broken=$(dpkg -C 2>/dev/null | grep -c . || true)
