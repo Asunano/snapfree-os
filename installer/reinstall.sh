@@ -8,7 +8,7 @@
 set -eE
 # [snapfree] 单仓库：安装器、清单、镜像都在同一个仓库
 confhome=https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer
-confhome_cn=
+confhome_cn=https://gh-proxy.com/https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer
 # [snapfree] 镜像清单（唯一真源）
 sf_repo=https://raw.githubusercontent.com/Asunano/snapfree-os/main
 sf_catalog=$sf_repo/catalog/catalog.tsv
