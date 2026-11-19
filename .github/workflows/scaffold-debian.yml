@@ -14,8 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: 生成 debian 套件并补丁安装器
-        run: python3 tools/scaffold.py
+      - name: 修复 debian 套件（keyring / 安全源 / apt-mirror）
+        run: python3 tools/debian-fix.py
 
       - name: 提交
         run: |
@@ -24,5 +24,5 @@ jobs:
           git config user.name 'snapfree-bot'
           git config user.email 'bot@users.noreply.github.com'
           git add -A
-          git commit -m '[scaffold] distros/debian 生成 + 通用 apt-mirror/keyring + 安装器 debian 分支校验' || echo '没有变更'
+          git commit -m '[scaffold] fix(debian): keyring 包名、security 源、apt-mirror 双 stanza' || echo '没有变更'
           git push
