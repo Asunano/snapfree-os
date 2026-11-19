@@ -35,9 +35,14 @@ MMD=(mmdebstrap
   --customize-hook="bash '$HERE/hooks/10-prepare.sh' \"\$1\""
   --customize-hook="bash '$HERE/hooks/99-cleanup.sh' \"\$1\""
 )
-# 宿主 keyring 不是目标发行版时必须显式指定，否则 apt 验签直接失败
-# 另外显式指向 Dir::Etc::Trusted：某些 apt/mmdebstrap 组合下仅靠 --keyring 仍会报 NO_PUBKEY
-[ -n "${KEYRING:-}" ] && MMD+=(--keyring="$KEYRING" --aptopt="Dir::Etc::Trusted=$KEYRING")
+# 宿主 keyring 与目标发行版不同时：
+#   --keyring 给 mmdebstrap 自己那趟 apt 用；
+#   --setup-hook 把 keyring 拷进 chroot 的 trusted.gpg.d，给 chroot 里的 apt update 用
+#   （setup hook 在 apt update 之前执行，这是 man 页明确推荐的做法）
+if [ -n "${KEYRING:-}" ]; then
+  MMD+=(--keyring="$KEYRING")
+  MMD+=(--setup-hook="bash -c 'mkdir -p \"\$1/etc/apt/trusted.gpg.d\"; cp \"$KEYRING\" \"\$1/etc/apt/trusted.gpg.d/99-archive-keyring.gpg\"'")
+fi
 
 log "包数量：$(printf '%s' "$PKGS" | tr ',' '\n' | wc -l)（ops=$WITH_OPS qga=$WITH_QGA firmware=$WITH_FIRMWARE）"
 log "开始下载并解压（首次约 400-600MB，视网络 5-20 分钟）"
