@@ -13,8 +13,20 @@ on:
         default: 'https://archive.ubuntu.com/ubuntu'
         required: true
       guest_mirror:
-        description: '写进镜像的 apt 源（装机后使用）'
+        description: '镜像内默认 apt 源（海外/自动识别前的默认）'
+        default: 'http://archive.ubuntu.com/ubuntu'
+        required: true
+      guest_mirror_cn:
+        description: '识别为中国大陆时使用的源'
         default: 'https://mirrors.aliyun.com/ubuntu'
+        required: true
+      mirror_auto:
+        description: '首启按出口 IP 自动选源（true/false）'
+        type: boolean
+        default: true
+      swap_mode:
+        description: 'swap 策略：auto=按内存分档 / none / 固定 MiB'
+        default: auto
         required: true
       img_size:
         description: '磁盘虚拟大小'
@@ -100,7 +112,10 @@ jobs:
         working-directory: distros/ubuntu
         env:
           IN_MIRROR: ${{ github.event.inputs.mirror || 'https://archive.ubuntu.com/ubuntu' }}
-          IN_GUEST_MIRROR: ${{ github.event.inputs.guest_mirror || 'https://mirrors.aliyun.com/ubuntu' }}
+          IN_GUEST_MIRROR: ${{ github.event.inputs.guest_mirror || 'http://archive.ubuntu.com/ubuntu' }}
+          IN_GUEST_MIRROR_CN: ${{ github.event.inputs.guest_mirror_cn || 'https://mirrors.aliyun.com/ubuntu' }}
+          IN_MIRROR_AUTO: ${{ github.event.inputs.mirror_auto || 'true' }}
+          IN_SWAP_MODE: ${{ github.event.inputs.swap_mode || 'auto' }}
           IN_SUITE: ${{ github.event.inputs.suite || 'resolute' }}
           IN_IMG_SIZE: ${{ github.event.inputs.img_size || '10G' }}
           IN_DOCKER: ${{ github.event.inputs.with_docker || 'false' }}
@@ -110,10 +125,15 @@ jobs:
           set -euo pipefail
           bool(){ [ "${1:-false}" = "true" ] && echo 1 || echo 0; }
           wd=$(bool "$IN_DOCKER"); ops=$(bool "$IN_OPS"); fw=$(bool "$IN_FIRMWARE")
-          echo "mirror=$IN_MIRROR guest=$IN_GUEST_MIRROR suite=$IN_SUITE size=$IN_IMG_SIZE docker=$wd ops=$ops firmware=$fw"
+          ma=$(bool "$IN_MIRROR_AUTO")
+          echo "mirror=$IN_MIRROR guest=$IN_GUEST_MIRROR guest_cn=$IN_GUEST_MIRROR_CN auto=$ma swap=$IN_SWAP_MODE suite=$IN_SUITE size=$IN_IMG_SIZE docker=$wd ops=$ops firmware=$fw"
           sudo env \
             MIRROR="$IN_MIRROR" \
             GUEST_MIRROR="$IN_GUEST_MIRROR" \
+            GUEST_MIRROR_CN="$IN_GUEST_MIRROR_CN" \
+            GUEST_MIRROR_DEFAULT="$IN_GUEST_MIRROR" \
+            MIRROR_AUTO="$ma" \
+            SWAP_MODE="$IN_SWAP_MODE" \
             SUITE="$IN_SUITE" \
             IMG_SIZE="$IN_IMG_SIZE" \
             WITH_DOCKER="$wd" \
