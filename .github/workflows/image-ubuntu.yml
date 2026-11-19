@@ -103,12 +103,12 @@ jobs:
           IN_GUEST_MIRROR: ${{ github.event.inputs.guest_mirror || 'https://mirrors.aliyun.com/ubuntu' }}
           IN_SUITE: ${{ github.event.inputs.suite || 'resolute' }}
           IN_IMG_SIZE: ${{ github.event.inputs.img_size || '10G' }}
-          IN_DOCKER: ${{ github.event.inputs.with_docker }}
-          IN_OPS: ${{ github.event.inputs.with_ops }}
-          IN_FIRMWARE: ${{ github.event.inputs.with_firmware }}
+          IN_DOCKER: ${{ github.event.inputs.with_docker || 'false' }}
+          IN_OPS: ${{ github.event.inputs.with_ops || 'true' }}
+          IN_FIRMWARE: ${{ github.event.inputs.with_firmware || 'false' }}
         run: |
           set -euo pipefail
-          bool(){ [ "${1:-true}" = "false" ] && echo 0 || echo 1; }
+          bool(){ [ "${1:-false}" = "true" ] && echo 1 || echo 0; }
           wd=$(bool "$IN_DOCKER"); ops=$(bool "$IN_OPS"); fw=$(bool "$IN_FIRMWARE")
           echo "mirror=$IN_MIRROR guest=$IN_GUEST_MIRROR suite=$IN_SUITE size=$IN_IMG_SIZE docker=$wd ops=$ops firmware=$fw"
           sudo env \
