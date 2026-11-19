@@ -147,17 +147,27 @@ sf_accel_is_cn() {
     [ "$_c" = CN ]
 }
 
-# 逐个镜像站测速，输出最快的那一个（全不通则无输出）
+# 并行给所有镜像站测速（各拉 1MB），输出最快的那一个；全不通则无输出
 sf_pick_mirror() {
-    local _u=$1 _m _spd _best= _bestspd=0
+    local _u=$1 _m _s _best= _bestspd=0 _d
+    _d=$(mktemp -d 2>/dev/null) || return 0
     for _m in $(sf_mirrors); do
-        _spd=$(sf_mirror_speed "$_m/$_u") || continue
-        echo "mirror: $_m ${_spd} B/s" >&2
-        if [ "$_spd" -gt "$_bestspd" ] 2>/dev/null; then
-            _bestspd=$_spd
-            _best=$_m
-        fi
+        (
+            _s=$(sf_mirror_speed "$_m/$_u") && printf '%s %s\n' "$_s" "$_m" >>"$_d/out"
+        ) &
     done
+    wait
+    if [ -f "$_d/out" ]; then
+        while read -r _s _m; do
+            [ -n "$_s" ] || continue
+            echo "mirror: $_m ${_s} B/s" >&2
+            if [ "$_s" -gt "$_bestspd" ] 2>/dev/null; then
+                _bestspd=$_s
+                _best=$_m
+            fi
+        done <"$_d/out"
+    fi
+    rm -rf "$_d"
     [ -n "$_best" ] && printf '%s' "$_best"
 }
 

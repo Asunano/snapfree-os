@@ -2,8 +2,8 @@
 
 安装器下载 qcow2 时会自动选更快的地址，规则只有两条：
 
-- **中国大陆的机器**：直接用加速站（按下面顺序探测，第一个可用的胜出）
-- **海外机器**：先直连 GitHub，只有直连不通（超时 / 失败）时才退到加速站
+- **中国大陆的机器**：给所有加速站并行测速，选最快的那个
+- **海外机器**：先直连 GitHub，只有直连不通（超时 / 失败）时才走加速站
 
 ## 国内判定（多级兜底，任一命中 CN 即算国内）
 
@@ -14,26 +14,29 @@
 
 命中的结果会写回 `_loc`，上游后续判断直接复用。
 
-## 加速站顺序
+## 候选站
 
-| 顺序 | 前缀 |
-|---|---|
-| 1 | `https://mirror-one.losn.cc` |
-| 2 | `https://mirror.drxian.qzz.io` |
-| 3 | `https://v4.gh-proxy.org` |
-| 4 | `https://axisnow.gh-proxy.org` |
+| 加速站 |
+|---|
+| `https://mirror-one.losn.cc` |
+| `https://mirror.drxian.qzz.io` |
+| `https://v4.gh-proxy.org` |
+| `https://axisnow.gh-proxy.org` |
+
+顺序只决定探测先后，最终按实际速度选，谁快用谁。
 
 真实下载地址 = 前缀 + 原 URL，例如：
 
 ```text
-https://mirror-one.losn.cc/https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2
+https://axisnow.gh-proxy.org/https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2
 ```
 
-## 探测方式
+## 测速方式
 
-- 先发 `HEAD`；站点不支持 `HEAD` 时用 `Range: 0-1023` 拉 1KB 兜底，并用 `--max-filesize 65536` 防止误拉整包
-- 返回 `text/html` / `application/json` / `text/plain`，或 `content-length` 小于 64KB 的，判为错误页而不算命中
-- 选中的前缀会缓存，同一次安装不重复探测
+- 所有候选站**并行**发一个 1MB 区间请求（`Range: 0-1048575`，`--max-filesize 4MB` 防误拉整包）
+- 返回码不是 200/206、`content-type` 是 `text/html`、或拿到不足 64KB 的，直接排掉（代理常拿伪 200 错误页糊弄）
+- 并行测速的总耗时约等于最慢的那一个（上限约 10 秒），不会四站串行叠加
+- 选中的站会缓存，同一次安装不会重复测速
 - 四个站都不可用时回落 GitHub 原地址（慢，但不会卡住安装）
 
 ## 生效范围
