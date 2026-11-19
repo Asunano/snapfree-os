@@ -29,7 +29,7 @@ wget
 ca-certificates
 gnupg
 
-# ---- 账户 / 区域 / 日志 ----
+# ---- 账户 / 区域 / 日得 ----
 sudo
 locales
 tzdata
@@ -41,6 +41,8 @@ openssh-server
 netplan.io
 cloud-init
 cloud-guest-utils
+# 时间同步：26.04 把 timesyncd 拆成独立包，不装就没有 systemd-timesyncd.service
+systemd-timesyncd
 
 # ---- 启动链 ----
 grub-common
