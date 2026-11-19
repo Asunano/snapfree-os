@@ -61,13 +61,32 @@ SIGNED_BY=$(awk '/^Signed-By:/{sub(/^Signed-By:[[:space:]]*/,""); print; exit}' 
 
 BACKUP=$(mktemp)
 cp "$SOURCES" "$BACKUP"
-cat > "$SOURCES" <<EOF
+DEF_SECURITY="https://security.debian.org/debian-security"
+if [ "$SUB" = debian ]; then
+  SEC_URI=$(printf '%s' "$URI" | sed -e 's|deb.debian.org/debian|security.debian.org/debian-security|' -e 's|/debian$|/debian-security|')
+  [ "$SEC_URI" != "$URI" ] || SEC_URI="$DEF_SECURITY"
+  cat > "$SOURCES" <<EOF
+Types: deb
+URIs: $URI
+Suites: $SUITE $SUITE-updates
+Components: $COMPONENTS
+Signed-By: $SIGNED_BY
+
+Types: deb
+URIs: $SEC_URI
+Suites: $SUITE-security
+Components: $COMPONENTS
+Signed-By: $SIGNED_BY
+EOF
+else
+  cat > "$SOURCES" <<EOF
 Types: deb
 URIs: $URI
 Suites: $SUITE $SUITE-updates $SUITE-security
 Components: $COMPONENTS
 Signed-By: $SIGNED_BY
 EOF
+fi
 
 echo "切换至 $URI（$SUITE / $COMPONENTS）"
 if ! apt-get update -q; then

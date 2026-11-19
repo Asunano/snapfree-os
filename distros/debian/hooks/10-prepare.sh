@@ -62,7 +62,13 @@ mkdir -p "$ROOT/etc/apt/sources.list.d" "$ROOT/etc/apt/preferences.d"
 cat > "$ROOT/etc/apt/sources.list.d/debian.sources" <<EOF
 Types: deb
 URIs: $GUEST_MIRROR
-Suites: $SUITE $SUITE-updates $SUITE-security
+Suites: $SUITE $SUITE-updates
+Components: main contrib non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: ${SECURITY_MIRROR:-$GUEST_MIRROR}
+Suites: $SUITE-security
 Components: main contrib non-free-firmware
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF

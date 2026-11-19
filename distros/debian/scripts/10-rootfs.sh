@@ -47,7 +47,7 @@ rm -f "$ROOTFS_TAR"
   "$SUITE" "$ROOTFS_TAR" \
   "deb $MIRROR $SUITE main contrib non-free-firmware" \
   "deb $MIRROR $SUITE-updates main contrib non-free-firmware" \
-  "deb $MIRROR $SUITE-security main contrib non-free-firmware"
+  "deb ${SECURITY_MIRROR:-$MIRROR} $SUITE-security main contrib non-free-firmware"
 
 [ -s "$ROOTFS_TAR" ] || die "rootfs.tar 生成失败"
 log "rootfs：$(du -h "$ROOTFS_TAR" | cut -f1)"
