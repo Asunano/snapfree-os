@@ -6,6 +6,7 @@ set -Eeuo pipefail
 ROOT="${1:?需要 rootfs 路径}"
 KIT_DIR="${KIT_DIR:?KIT_DIR 未导出}"
 export DEBIAN_FRONTEND=noninteractive
+SWAP_MIN_MB="${SWAP_MIN_MB:-2048}"
 
 log(){ printf '  · %s\n' "$*"; }
 
@@ -18,14 +19,22 @@ for d in dev dev/pts proc sys; do ensure "$d"; done
 
 # ---------- 静态文件 ----------
 cp -a "$KIT_DIR/files/." "$ROOT/"
-chmod 0755 "$ROOT/usr/local/bin/apt-mirror"
+chmod 0755 "$ROOT/usr/local/bin/apt-mirror" "$ROOT/usr/local/bin/sf-firstboot"
+
+# ---------- 镜像参数（首启脚本读它） ----------
+mkdir -p "$ROOT/etc"
+cat > "$ROOT/etc/sf-image.conf" <<EOF
+# snapfree-os 镜像参数（首启一次性任务读取）
+TIMEZONE=$TIMEZONE
+SWAP_MIN_MB=$SWAP_MIN_MB
+EOF
 
 # ---------- 主机名 / 时区 ----------
 printf '%s\n' "$IMAGE_HOSTNAME" > "$ROOT/etc/hostname"
 sed -i "s/__HOSTNAME__/$IMAGE_HOSTNAME/g" "$ROOT/etc/hosts"
 ln -sf "/usr/share/zoneinfo/$TIMEZONE" "$ROOT/etc/localtime"
 printf '%s\n' "$TIMEZONE" > "$ROOT/etc/timezone"
-sed -i "s/__USER_NAME__/$USER_NAME/g" "$ROOT/etc/cloud/cloud.cfg.d/99-image.cfg"
+sed -i "s/__USER_NAME__/$USER_NAME/g; s|__TIMEZONE__|$TIMEZONE|g" "$ROOT/etc/cloud/cloud.cfg.d/99-image.cfg"
 
 # ---------- 兜底网络（不写 netplan）----------
 # reinstall 装机会生成 /etc/netplan/50-cloud-init.yaml；
@@ -64,7 +73,9 @@ cp -L /etc/resolv.conf "$ROOT/etc/resolv.conf" 2>/dev/null || true
 # ---------- systemd 单元 ----------
 # 构建机（容器）里通常没有 systemd，所以进 chroot 用离线模式操作
 syscfg(){ chroot "$ROOT" systemctl --root=/ "$@" >/dev/null 2>&1 || log "warn: systemctl $* 失败"; }
-syscfg enable ssh.service systemd-networkd.service systemd-timesyncd.service
+syscfg enable systemd-networkd.service systemd-timesyncd.service
+syscfg enable ssh.socket ssh.service
+syscfg enable sf-firstboot.service
 syscfg enable fstrim.timer logrotate.timer
 syscfg set-default multi-user.target
 
@@ -77,6 +88,11 @@ rm -f "$ROOT/etc/update-motd.d/10-help-text" \
 if [ -f "$ROOT/etc/default/motd-news" ]; then
   sed -i 's/^ENABLED=.*/ENABLED=0/' "$ROOT/etc/default/motd-news"
 fi
+# 防止 systemd preset 在首次启动把上面禁用的定时器又打开
+mkdir -p "$ROOT/etc/systemd/system"
+for t in apt-daily.timer apt-daily-upgrade.timer motd-news.timer; do
+  [ -e "$ROOT/usr/lib/systemd/system/$t" ] && ln -sf /dev/null "$ROOT/etc/systemd/system/$t"
+done
 
 RESOLVED_UNIT=""
 for u in "$ROOT/lib/systemd/system/systemd-resolved.service" "$ROOT/usr/lib/systemd/system/systemd-resolved.service"; do
@@ -152,7 +168,7 @@ if [ -n "$RESOLVED_UNIT" ]; then
   ln -sf ../run/systemd/resolve/stub-resolv.conf "$ROOT/etc/resolv.conf"
 else
   printf 'nameserver %s\n' "${DNS_ADDRS%% *}" > "$ROOT/etc/resolv.conf"
-  log "warn: 未发现 systemd-resolved，已写入静态 DNS"
+  log "未发现 systemd-resolved，已写入静态 DNS"
 fi
 
 # ---------- 断言 ----------
@@ -168,4 +184,13 @@ fi
 if [ ! -e "$ROOT/etc/systemd/network/99-fallback-dhcp.network" ]; then
   printf '[!] 缺兜底网络配置\n' >&2; exit 1
 fi
-log "校验通过：无 snapd，无 /snap，netplan 无重复定义，兜底网络就位"
+if ! chroot "$ROOT" dpkg-query -W -f='${db:Status-Status}' systemd-timesyncd 2>/dev/null | grep -q installed; then
+  printf '[!] systemd-timesyncd 未安装（时间同步会缺失）\n' >&2; exit 1
+fi
+if [ ! -e "$ROOT/etc/systemd/system/sf-firstboot.service" ]; then
+  printf '[!] sf-firstboot 单元缺失（时区/swap 不会被修正）\n' >&2; exit 1
+fi
+if [ ! -e "$ROOT/etc/systemd/system.conf.d/99-limits.conf" ]; then
+  printf '[!] 缺 systemd 默认 ulimit 配置\n' >&2; exit 1
+fi
+log "校验通过：无 snapd，无 /snap，netplan 无重复定义，兜底网络就位，timesyncd 已装，首启修正单元就位"

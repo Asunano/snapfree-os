@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# ============================================================
+#  首启一次性修正：时区 + swap
+#  为什么需要它：
+#   reinstall 的 trans.sh 在 basic_init 里硬编码
+#   systemd-firstboot --timezone=Etc/UTC，镜像里的 Asia/Shanghai
+#   会被覆盖；这里在首启时按 /etc/sf-image.conf 改回来。
+#   小内存机器默认没有 swap，这里按内存的一半（上限 2G）建 swapfile。
+#  执行完写标记并自我禁用，之后不再跑。
+# ============================================================
+set -Eeuo pipefail
+
+MARK=/var/lib/sf-firstboot.done
+[ -e "$MARK" ] && exit 0
+
+CONF=/etc/sf-image.conf
+cfg(){ awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$CONF" 2>/dev/null; }
+
+TZ_WANT=$(cfg TIMEZONE); TZ_WANT="${TZ_WANT:-Asia/Shanghai}"
+SWAP_MIN_MB=$(cfg SWAP_MIN_MB); SWAP_MIN_MB="${SWAP_MIN_MB:-2048}"
+
+# ---------- 时区 ----------
+if [ -e "/usr/share/zoneinfo/$TZ_WANT" ]; then
+  ln -sf "/usr/share/zoneinfo/$TZ_WANT" /etc/localtime
+  printf '%s\n' "$TZ_WANT" > /etc/timezone
+  timedatectl set-timezone "$TZ_WANT" >/dev/null 2>&1 || true
+  logger -t sf-firstboot "timezone set to $TZ_WANT"
+fi
+# NTP 立即启用（失败不影响后续）
+systemctl enable --now systemd-timesyncd >/dev/null 2>&1 || true
+
+# ---------- swap ----------
+if [ "$SWAP_MIN_MB" -gt 0 ] 2>/dev/null && ! swapon --show=NAME --noheadings 2>/dev/null | grep -q . && [ ! -e /swapfile ]; then
+  MEM_MB=$(( $(awk '/MemTotal/{print $2; exit}' /proc/meminfo) / 1024 ))
+  SIZE=$(( MEM_MB / 2 ))
+  [ "$SIZE" -gt "$SWAP_MIN_MB" ] && SIZE=$SWAP_MIN_MB
+  [ "$SIZE" -lt 512 ] && SIZE=512
+  AVAIL_MB=$(( $(df -Pm / | awk 'NR==2{print $4}') ))
+  if [ "$AVAIL_MB" -gt $(( SIZE + 1024 )) ]; then
+    if fallocate -l "${SIZE}M" /swapfile 2>/dev/null; then :; else
+      dd if=/dev/zero of=/swapfile bs=1M count="$SIZE" status=none
+    fi
+    chmod 600 /swapfile
+    mkswap -q /swapfile >/dev/null
+    swapon /swapfile
+    grep -qs '^/swapfile ' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+    logger -t sf-firstboot "swapfile ${SIZE}MiB created"
+  else
+    logger -t sf-firstboot "not enough free space for swapfile, skipped"
+  fi
+fi
+
+mkdir -p /var/lib
+: > "$MARK"
+systemctl disable sf-firstboot.service >/dev/null 2>&1 || true
+exit 0

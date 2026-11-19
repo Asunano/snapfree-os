@@ -41,6 +41,8 @@ export USER_NAME="${USER_NAME:-ubuntu}"
 export USER_PASSWORD="${USER_PASSWORD:-}"        # 留空 = 不设密码
 export SSH_PASSWORD_AUTH="${SSH_PASSWORD_AUTH:-yes}"
 export GRUB_ID="${GRUB_ID:-ubuntu}"
+# 首启自动建 swapfile 的上限（MB，0 = 不建）；实际取 min(该值, 内存的一半)
+export SWAP_MIN_MB="${SWAP_MIN_MB:-2048}"
 
 # ---- 组件开关 ----
 export WITH_DOCKER="${WITH_DOCKER:-0}"           # Docker CE（默认关闭，纯净系统；需要时 WITH_DOCKER=1）
