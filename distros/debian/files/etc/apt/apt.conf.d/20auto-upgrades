@@ -1,0 +1,6 @@
+// 关掉 apt 的自动轮询与自动升级（镜像内不想被后台任务改状态）
+APT::Periodic::Enable "0";
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Download-Upgradeable-Packages "0";
+APT::Periodic::AutocleanInterval "0";
+APT::Periodic::Unattended-Upgrade "0";

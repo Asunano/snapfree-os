@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# ============================================================
+#  首启一次性修正（执行完写标记并自我禁用，之后不再跑）
+#   1) 时区：reinstall 的 trans.sh 会 systemd-firstboot --timezone=Etc/UTC，
+#      这里按 /etc/sf-image.conf 的 TIMEZONE 改回来
+#   2) apt 源：按出口 IP 所在地区自动选国内镜像/官方源
+#   3) swap：按内存大小自动建 swapfile（16G 及以上不建）
+# ============================================================
+set -Eeuo pipefail
+
+MARK=/var/lib/sf-firstboot.done
+[ -e "$MARK" ] && exit 0
+
+CONF=/etc/sf-image.conf
+cfg(){ awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$CONF" 2>/dev/null; }
+
+TZ_WANT=$(cfg TIMEZONE); TZ_WANT="${TZ_WANT:-Asia/Shanghai}"
+SWAP_MODE=$(cfg SWAP_MODE); SWAP_MODE="${SWAP_MODE:-auto}"
+
+# ---------- 1. 时区 ----------
+if [ -e "/usr/share/zoneinfo/$TZ_WANT" ]; then
+  ln -sf "/usr/share/zoneinfo/$TZ_WANT" /etc/localtime
+  printf '%s\n' "$TZ_WANT" > /etc/timezone
+  timedatectl set-timezone "$TZ_WANT" >/dev/null 2>&1 || true
+  logger -t sf-firstboot "timezone -> $TZ_WANT"
+fi
+systemctl enable --now systemd-timesyncd >/dev/null 2>&1 || true
+
+# ---------- 2. apt 源（只有国内机器才切国内镜像） ----------
+if [ -x /usr/local/bin/sf-mirror-auto ]; then
+  logger -t sf-firstboot "running sf-mirror-auto"
+  /usr/local/bin/sf-mirror-auto >>/var/log/sf-mirror.log 2>&1 || \
+    logger -t sf-firstboot "sf-mirror-auto failed, keep current sources"
+fi
+
+# ---------- 3. swap：按内存大小分档 ----------
+calc_swap_mb(){
+  local mem_mb="$1" size
+  if   [ "$mem_mb" -lt 1024 ];  then size=$(( mem_mb * 2 ))   # <1G：2 倍
+  elif [ "$mem_mb" -lt 2048 ];  then size=2048                # 1–2G：2G
+  elif [ "$mem_mb" -lt 4096 ];  then size="$mem_mb"           # 2–4G：等于内存
+  elif [ "$mem_mb" -lt 16384 ]; then size=4096                # 4–16G：4G
+  else size=0                                                 # ≥16G：不建
+  fi
+  echo "$size"
+}
+
+case "$SWAP_MODE" in
+  auto) DO_SWAP=1; SIZE_OVERRIDE="" ;;
+  none|0|"") DO_SWAP=0 ;;
+  *)    DO_SWAP=1; SIZE_OVERRIDE="$SWAP_MODE" ;;
+esac
+
+if [ "$DO_SWAP" = "1" ]; then
+  if swapon --show=NAME --noheadings 2>/dev/null | grep -q .; then
+    logger -t sf-firstboot "swap already active, skip"
+  elif [ -e /swapfile ]; then
+    logger -t sf-firstboot "/swapfile exists, skip"
+  else
+    MEM_MB=$(( $(awk '/MemTotal/{print $2; exit}' /proc/meminfo) / 1024 ))
+    if [ -n "$SIZE_OVERRIDE" ]; then SIZE="$SIZE_OVERRIDE"; else SIZE=$(calc_swap_mb "$MEM_MB"); fi
+    if [ "$SIZE" -le 0 ] 2>/dev/null; then
+      logger -t sf-firstboot "RAM ${MEM_MB}MiB large enough, skip swap"
+    else
+      [ "$SIZE" -lt 512 ] && SIZE=512
+      [ "$SIZE" -gt 8192 ] && SIZE=8192
+      AVAIL_MB=$(( $(df -Pm / | awk 'NR==2{print $4}') ))
+      if [ "$AVAIL_MB" -gt $(( SIZE + 1024 )) ]; then
+        if fallocate -l "${SIZE}M" /swapfile 2>/dev/null; then :; else
+          dd if=/dev/zero of=/swapfile bs=1M count="$SIZE" status=none
+        fi
+        chmod 600 /swapfile
+        mkswap -q /swapfile >/dev/null
+        swapon /swapfile
+        grep -qs '^/swapfile ' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+        logger -t sf-firstboot "swapfile ${SIZE}MiB created (RAM ${MEM_MB}MiB)"
+      else
+        logger -t sf-firstboot "not enough disk for ${SIZE}MiB swap, skipped"
+      fi
+    fi
+  fi
+fi
+
+mkdir -p /var/lib
+: > "$MARK"
+systemctl disable sf-firstboot.service >/dev/null 2>&1 || true
+exit 0
