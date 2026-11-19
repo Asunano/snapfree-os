@@ -27,14 +27,18 @@ ln -sf "/usr/share/zoneinfo/$TIMEZONE" "$ROOT/etc/localtime"
 printf '%s\n' "$TIMEZONE" > "$ROOT/etc/timezone"
 sed -i "s/__USER_NAME__/$USER_NAME/g" "$ROOT/etc/cloud/cloud.cfg.d/99-image.cfg"
 
-# ---------- netplan DNS ----------
+# ---------- 兜底网络（不写 netplan）----------
+# reinstall 装机会在 /etc/netplan 生成 50-cloud-init.yaml；
+# 镜像里再放一份 netplan 会因同一网卡被两次定义而报错，导致整份配置不生效（网络全断）。
+# 因此这里只放 systemd-networkd 的兜底配置，它只负责最基础的 DHCP，可与 netplan 共存。
+NC="$ROOT/etc/systemd/network/99-fallback-dhcp.network"
+mkdir -p "$(dirname "$NC")"
 if [ -n "${DNS_ADDRS:-}" ]; then
-  DNS_LIST=$(printf '%s' "$DNS_ADDRS" | tr -s ' ' | sed 's/ /, /g; s/, $//')
-  sed -i "s|__DNS_ADDRS__|$DNS_LIST|" "$ROOT/etc/netplan/10-image.yaml"
-  log "DNS 固定为：$DNS_LIST"
+  sed -i "s|__DNS_ADDRS__|$DNS_ADDRS|" "$NC"
+  log "兜底 DNS：$DNS_ADDRS"
 else
-  sed -i '/^      nameservers:/,+1d' "$ROOT/etc/netplan/10-image.yaml"
-  log "DNS 沿用 DHCP 下发"
+  sed -i "/^DNS=/d" "$NC"
+  log "兜底 DNS 沿用 DHCP 下发"
 fi
 
 # ---------- apt：写入镜像源（可与构建源不同）+ 关掉 snapd ----------
@@ -126,14 +130,15 @@ fi
 
 if [ -n "$USER_PASSWORD" ]; then
   chroot "$ROOT" bash -ec "printf '%s:%s\\n' \"\$0\" \"\$1\" | chpasswd" "$USER_NAME" "$USER_PASSWORD"
-  log "已设置 $USER_NAME 密码，SSH 密码登录仍由 SSH_PASSWORD_AUTH 决定"
+  log "已设置 $USER_NAME 密码（是否允许密码登录见下）"
 fi
 
-if [ "$SSH_PASSWORD_AUTH" = "yes" ]; then
+# SSH：默认允许密码登录（不再强制只允许密钥）
+if ! grep -qi '^PasswordAuthentication yes' "$ROOT/etc/ssh/sshd_config.d/10-image.conf"; then
   printf 'PasswordAuthentication yes\n' >> "$ROOT/etc/ssh/sshd_config.d/10-image.conf"
-  if [ -z "$USER_PASSWORD" ]; then
-    log "warn: SSH_PASSWORD_AUTH=yes 但 USER_PASSWORD 为空 —— 该用户没有密码，仍无法登录"
-  fi
+fi
+if [ -z "$USER_PASSWORD" ]; then
+  log "warn: 未设 USER_PASSWORD，$USER_NAME 没有密码，密码登录仍不可用"
 fi
 
 # ---------- 收尾：DNS ----------
@@ -149,4 +154,5 @@ if chroot "$ROOT" dpkg-query -W -f='${db:Status-Status}\n' snapd >/dev/null 2>&1
   printf '[!] snapd 被意外安装进来了\n' >&2; exit 1
 fi
 [ -e "$ROOT/snap" ] && { printf '[!] rootfs 里出现了 /snap\n' >&2; exit 1; }
-log "校验通过：snapd 未安装，/snap 不存在"
+[ -e "$ROOT/etc/netplan/10-image.yaml" ] && { printf '[!] 镜像里不应再有 netplan 兜底文件（会与安装器生成的 50-cloud-init.yaml 冲突）\n' >&2; exit 1; }
+log "校验通过：snapd 未安装，/snap 不存在，netplan 无重复定义"

@@ -1,0 +1,10 @@
+# 网络兜底：systemd-networkd 直接 DHCP，与 netplan 生成配置可共存（不会像 netplan 那样“重复定义”报错）
+[Match]
+Name=en* eth* e*
+
+[Network]
+DHCP=yes
+DNS=__DNS_ADDRS__
+
+[DHCPv4]
+ClientIdentifier=mac
