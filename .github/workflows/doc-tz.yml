@@ -1,0 +1,22 @@
+name: doc-tz
+on:
+  push:
+    paths: ['tools/tz.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tools/doc-tz.py
+      - run: |
+          set -euo pipefail
+          git config user.name 'snapfree-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: 定时重建时间标注 UTC' || echo no-change
+          git push
