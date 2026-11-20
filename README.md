@@ -95,7 +95,12 @@ ssh root@你的服务器IP
 - **自动对时**：`systemd-timesyncd` + 国内 NTP，时区 `Asia/Shanghai`
 - **文件句柄 / 连接数上限**：按服务器场景调过，不会动辄报 `too many open files`
 - **qemu-guest-agent**：云平台能看虚拟机 IP 和状态
-- **编辑器 / 常用工具**：`nano`、`vim-tiny`、`git`、`tmux`、`htop`、`rsync`、`jq`、`unzip`、`curl`、`wget`
+- **编辑器**：`nano`、`vim-tiny`
+- **网络诊断**：`mtr-tiny`（路由逐跳质量）、`traceroute`、`bind9-dnsutils`（dig/nslookup）、`whois`、`tcpdump`、`iftop`（实时带宽）、`nmap`、`socat`、`net-tools`（ifconfig/netstat）、`lsof`（谁占了端口/文件）
+- **系统观察**：`htop`、`sysstat`（sar/iostat/mpstat 历史数据）、`strace`、`ncdu`（磁盘占用排行）、`tree`、`file`、`bc`、`time`、`pv`
+- **磁盘 / 分区**：`parted`、`gdisk`（VPS 扩容后用）
+- **压缩**：`unzip`、`zip`、`xz-utils`、`bzip2`、`zstd`、`pigz`、`lz4`
+- **日常**：`git`、`tmux`、`rsync`、`jq`、`bash-completion`、`openssl`、`pciutils`、`man-db`（有 `man`）
 
 ## 系统里没有的东西
 
