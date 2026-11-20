@@ -136,7 +136,7 @@ cd distros/debian && SUITE=bookworm bash ./build.sh       # Debian 12
 
 发布：`publish-latest` 任务仅在 `main` 分支且 commit message 包含 `[publish]` 时执行，把四套 qcow2 与 `.sha256` 发布到 Release `image-latest`。日常提交只验证、不发布。
 
-触发条件：`push` 到 `main` 且改动命中 `distros/**` 或本 workflow 文件；`workflow_dispatch`；每月 1 日 18:00 定时重建。
+触发条件：`push` 到 `main` 且改动命中 `distros/**` 或本 workflow 文件；`workflow_dispatch`；每月 1 日 18:00（UTC，即北京时间 2 日 02:00）定时重建。
 
 ### installer-contract
 
