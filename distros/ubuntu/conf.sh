@@ -42,7 +42,7 @@ export QCOW2_COMPRESS="${QCOW2_COMPRESS:-1}"
 
 # ---- 系统 ----
 export TIMEZONE="${TIMEZONE:-Asia/Shanghai}"
-export USER_NAME="${USER_NAME:-ubuntu}"
+export USER_NAME="${USER_NAME:-root}"     # 默认直接 root 登录；想要普通用户就改成 ubuntu/debian 重建
 export USER_PASSWORD="${USER_PASSWORD:-}"        # 留空 = 不设密码
 export SSH_PASSWORD_AUTH="${SSH_PASSWORD_AUTH:-yes}"
 export GRUB_ID="${GRUB_ID:-ubuntu}"

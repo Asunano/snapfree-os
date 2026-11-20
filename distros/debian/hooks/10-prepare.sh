@@ -167,6 +167,17 @@ if [ -n "$USER_PASSWORD" ]; then
   log "已设置 $USER_NAME 密码"
 fi
 
+# 默认用户是 root 时，确保 /root 与 .ssh 权限正确
+if [ "$USER_NAME" = root ]; then
+  chmod 700 "$ROOT/root"
+  mkdir -p "$ROOT/root/.ssh"
+  chmod 700 "$ROOT/root/.ssh"
+  if [ -f "$ROOT/root/.ssh/authorized_keys" ]; then
+    chmod 600 "$ROOT/root/.ssh/authorized_keys"
+  fi
+  log "默认用户为 root（PermitRootLogin yes）"
+fi
+
 # SSH：默认允许密码登录；没设密码时给出提示
 if ! grep -qi '^PasswordAuthentication yes' "$ROOT/etc/ssh/sshd_config.d/10-image.conf"; then
   printf 'PasswordAuthentication yes\n' >> "$ROOT/etc/ssh/sshd_config.d/10-image.conf"
