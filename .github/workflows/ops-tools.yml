@@ -1,0 +1,22 @@
+name: ops-tools
+on:
+  push:
+    paths: ['tools/ops.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tools/ops-tools.py
+      - run: |
+          set -euo pipefail
+          git config user.name 'snapfree-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: README 工具清单分层' || echo no-change
+          git push
