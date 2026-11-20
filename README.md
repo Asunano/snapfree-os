@@ -1,164 +1,276 @@
 # snapfree-os
 
-给 **VPS / 云服务器 / KVM 虚拟机** 用的重装系统工具。
+[![Release](https://img.shields.io/github/v/release/Asunano/snapfree-os?style=flat-square&label=image-latest)](https://github.com/Asunano/snapfree-os/releases/latest)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](installer/LICENSE)
+[![image-build](https://img.shields.io/github/actions/workflow/status/Asunano/snapfree-os/image-build.yml?style=flat-square&label=image-build)](https://github.com/Asunano/snapfree-os/actions/workflows/image-build.yml)
 
-一句话：系统里不塞垃圾（没有 snap、没有 Docker、没有 nodejs），装完不光秃秃也安全，常用优化（BBR、swap、国内源、对时）已经配好。
+自建纯净服务器镜像 + 魔改版 reinstall 安装器。安装器 fork 自 [bin456789/reinstall](https://github.com/bin456789/reinstall)，安装核心逻辑保持上游实现，仅替换镜像来源与菜单。
 
-只能装在 **KVM / 云主机 / VPS** 上，不支持 OpenVZ/LXC，也不能装在物理机上。
+## 介绍
 
-## 能装哪些系统
+- 四套自建镜像，基于官方源从零构建，非官方 cloud image 的二次加工：Ubuntu 26.04 LTS / 24.04 LTS、Debian 13 (trixie) / 12 (bookworm)
+- 镜像不含 snap/snapd、Docker、nodejs/npm、nginx/数据库、linux-firmware；需要的组件由使用者自行安装
+- 四套镜像套件独立（各自的源、组件、keyring、内核包名），优化基线完全一致
+- 默认用户为 `root`，镜像内不预置任何密码，登录凭据由安装时下发
+- 安装器菜单只列 `catalog/catalog.tsv` 中的镜像；清单外的版本直接报错，不会回落到官方 cloud image
+- 镜像下载按实测带宽选站：国内机器走加速站，海外机器优先 GitHub 直连
+- 每套镜像发布前均经 QEMU + OVMF 真启动冒烟，串口出现 cloud-init / login 才允许发布
 
-| 系统 | 版本 | 下载大小 |
-|---|---|---|
-| Ubuntu | 26.04 LTS / 24.04 LTS | 1.2G / 1.1G |
-| Debian | 13 (trixie) / 12 (bookworm) | 350M / 380M |
+## 快速开始
 
-四套都是 64 位 x86_64，从零构建的纯净版，优化配置四套完全一致。**默认用户全部是 root**。
+- [支持范围](#支持范围)
+- [系统要求](#系统要求)
+- [获取安装器](#获取安装器)
+- [交互安装](#交互安装)
+- [非交互安装与参数](#非交互安装与参数)
+- [镜像清单](#镜像清单)
+- [镜像内容](#镜像内容)
+- [优化基线](#优化基线)
+- [首次启动行为](#首次启动行为)
+- [镜像下载加速](#镜像下载加速)
+- [更换软件源](#更换软件源)
+- [装机后自检](#装机后自检)
+- [故障排查](#故障排查)
+- [自己构建镜像](#自己构建镜像)
 
-## 怎么装
+## 支持范围
 
-用 root 登录你的服务器（SSH 或服务商网页控制台都行），把下面这一整行复制粘贴进去，回车：
+| 项 | 支持情况 |
+|---|---|
+| KVM / 云主机 / VPS | 支持 |
+| Hyper-V / VMware / Xen HVM | 支持（需自行确认网卡与引导兼容） |
+| OpenVZ / LXC | 不支持（无独立内核，无法引导） |
+| 物理机 / 独立服务器 | 不支持（镜像不含 linux-firmware） |
+
+> [!WARNING]
+> 安装过程会清空目标磁盘**全部分区**。执行前请确认机器上没有需要保留的数据，并确保拥有服务商控制台（VNC/串行）的救援入口。
+
+> [!NOTE]
+> 安装器保留上游的 `windows`、`alpine`、`dd`、`redhat` 等入口，但本项目只为上表四套镜像提供支持与验证，其余入口行为以上游为准。
+
+## 系统要求
+
+| 项 | 要求 |
+|---|---|
+| CPU | x86_64，支持 BIOS 或 UEFI 引导 |
+| 内存 | ≥ 512 MB，推荐 ≥ 1 GB |
+| 硬盘 | ≥ 12 GB（镜像虚拟盘为 10 GB ext4 + 256 MiB ESP） |
+| 网络 | IPv4 或 IPv6，能访问 GitHub 或加速站 |
+| 现有系统 | 任意 Linux（脚本以 root 运行） |
+
+## 获取安装器
+
+海外服务器：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)
 ```
 
-> 这一步卡住或报错（国内访问 GitHub 经常很慢），换成这条走加速的：
->
-> ```bash
-> bash <(curl -fsSL https://mirror-one.losn.cc/https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)
-> ```
+国内服务器（走加速站）：
 
-然后会出现菜单，用数字选你要装的系统：
+```bash
+bash <(curl -fsSL https://mirror-one.losn.cc/https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh)
+```
+
+## 交互安装
+
+不带参数运行会读取 `catalog/catalog.tsv` 渲染菜单：
 
 ```text
 ***** 可选镜像 *****
    1) ubuntu  26.04   server  1.2G  Ubuntu 26.04 LTS 无 snap 服务器镜像
    2) ubuntu  24.04   server  1.1G  Ubuntu 24.04 LTS 无 snap 服务器镜像
-   3) debian  13      server  350M  Debian 13 (trixie) 纯净服务器镜像
-   4) debian  12      server  380M  Debian 12 (bookworm) 纯净服务器镜像
+   3) debian  13      server  365M  Debian 13 (trixie) 纯净服务器镜像
+   4) debian  12      server  410M  Debian 12 (bookworm) 纯净服务器镜像
    0) 退出
 ```
 
-菜单里**只能选仓库里有的镜像**，选完自动下载、写入磁盘、重启进新系统。中途 SSH 会断一次，正常。
+选择编号后需二次确认。确认后依次执行：下载镜像 → 写入目标盘 → 安装引导 → 重启进新系统。
 
-## 安装时它问你什么
+安装过程中 SSH 会中断一次，属预期行为；进度可通过服务商 VNC 控制台或串行控制台观察。
 
-1. **用户名**：直接回车就是 `root`（默认）。想用普通用户就把名字写成 `ubuntu` / `debian` 或随便什么，安装器会自己建。
-2. **密码**：可以留空。
-3. **SSH 公钥**：可以留空。
-4. 主机名、DNS、时区：一路回车用默认就行。
-
-**密码和公钥两样都不给，装完谁都登不上**——镜像里没任何预置密码，安全也就不怕扫。
-
-### “不想设密码就设置 SSH 密钥”到底是什么意思
-
-SSH 登录只认两种凭据：**密码** 或 **密钥**。二选一都行，都能进。
-
-- 设了密码：以后 `ssh root@IP`，输密码进去。简单，但密码被猜中/被暴破的风险一直在。
-- 只给密钥、密码留空：以后 `ssh -i 你的私钥 root@IP`，不输密码直接进。安全性高得多，这是服务器圈子的常规做法。
-
-想要密钥的话，在自己电脑上先生成一对（没有的话）：
+## 非交互安装与参数
 
 ```bash
-ssh-keygen -t ed25519        # 一路回车，默认存到 ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub    # 这个是公钥，整行复制
+bash reinstall.sh debian 13 --username root --password 'PASSWORD'
+bash reinstall.sh ubuntu 24.04 --ssh-key 'ssh-ed25519 AAAA... user@host'
 ```
 
-安装器问 SSH 公钥时，把 `ssh-keygen` 生成的那一行公钥粘进去。私钥（`id_ed25519`，没有 `.pub`）留在自己电脑，永不外传。
+参数沿用上游定义，与本项目相关的部分：
 
-不想用菜单也可以直接指定（同样只认仓库里的镜像）：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/installer/reinstall.sh) \
-  debian 13 --username root --password '你的密码'
-```
-
-## 装完怎么用
-
-1. 等机器重启（一般 1～3 分钟）
-2. 用密码或密钥 SSH 登录：
-
-```bash
-ssh root@你的服务器IP
-```
-
-默认就是 root，不需要 sudo，也没 sudo 这回事。
-
-## 装完就已经有的东西
-
-不用你动手，下面这些开箱就是好的：
-
-- **BBR 拥塞控制 + fq**：网络提速标配，`sysctl net.ipv4.tcp_congestion_control` 能看到 `bbr`
-- **swap 自动分档**：按内存自动建（1G 内存建 2G，4G 内存建 4G，16G 以上不建），开机自动挂载
-- **国内软件源**：首启自动判断国内/国外，国内机自动换成国内源
-- **自动对时**：`systemd-timesyncd` + 国内 NTP，时区 `Asia/Shanghai`
-- **文件句柄 / 连接数上限**：按服务器场景调过，不会动辄报 `too many open files`
-- **qemu-guest-agent**：云平台能看虚拟机 IP 和状态
-- **编辑器**：`nano`、`vim-tiny`
-- **网络诊断**：`mtr-tiny`（路由逐跳质量）、`traceroute`、`bind9-dnsutils`（dig/nslookup）、`whois`、`tcpdump`、`iftop`（实时带宽）、`nmap`、`socat`、`net-tools`（ifconfig/netstat）、`lsof`（谁占了端口/文件）
-- **系统观察**：`htop`、`sysstat`（sar/iostat/mpstat 历史数据）、`strace`、`ncdu`（磁盘占用排行）、`tree`、`file`、`bc`、`time`、`pv`
-- **磁盘 / 分区**：`parted`、`gdisk`（VPS 扩容后用）
-- **压缩**：`unzip`、`zip`、`xz-utils`、`bzip2`、`zstd`、`pigz`、`lz4`
-- **日常**：`git`、`tmux`、`rsync`、`jq`、`bash-completion`、`openssl`、`pciutils`、`man-db`（有 `man`）
-
-## 系统里没有的东西
-
-按需求刻意没装，想要自己装：
-
-| 没有 | 怎么装 |
+| 参数 | 说明 |
 |---|---|
-| snap / snapd | Ubuntu 镜像本来就不带，也不要装 |
-| Docker | `curl -fsSL https://get.docker.com \\| sh` |
-| nodejs / npm | 用 nvm，或 `apt install nodejs npm` |
-| nginx / mysql / php | 自己 `apt install` |
-| linux-firmware | 虚拟机用不上；装物理机才需要 |
+| `--username USERNAME` | 新系统用户名，默认 `root` |
+| `--password PASSWORD` | 新系统密码，留空则该账户无密码 |
+| `--ssh-key KEY` | 写入 `authorized_keys` 的 SSH 公钥；与 `--password` 可同时使用，也可只用其一 |
+| `--ssh-port PORT` | 修改 SSH 端口 |
+| `--web-port PORT` | 修改安装期间日志页端口 |
+| `--hold 1` | 仅重启到安装环境，不执行安装，用于验证网络连通性 |
+| `--hold 2` | 安装完成后不重启，用于进入目标系统修正配置 |
+| `--img URL` | 指定自定义镜像，跳过 catalog 校验 |
 
-## 关于下载速度
+> [!IMPORTANT]
+> `--password` 与 `--ssh-key` 至少提供一项。两者皆空时新系统没有任何登录凭据，SSH 无法登录。
 
-安装器下载镜像时会逐个加速站测一下（各拉 1MB 计时），挑最快那个下载；海外机器能直连 GitHub 就直连，直连不通才走加速站。四个站全挂时回落 GitHub 原地址，不会卡住。
+> [!NOTE]
+> 通过 `--img` 指定的链接不参与镜像加速改写，直连原始地址。
 
-下载到的文件与官方发布的是同一个，校验值一致。
+## 镜像清单
 
-## 常见问题
+`catalog/catalog.tsv` 是唯一真源，为安装器菜单与下载地址的唯一来源。
 
-**装完 ping 不通 / SSH 连不上？**
-先在云控制台确认机器真重启完了，再确认安装时设了密码或加了公钥（两样都没给就肯定进不去）。
+| ID | 系统 | 版本 | 体积 | 虚拟盘 |
+|---|---|---|---|---|
+| `ubuntu-26.04-server-snapfree` | Ubuntu | 26.04 LTS (resolute) | 1.2G | 10G |
+| `ubuntu-24.04-server-snapfree` | Ubuntu | 24.04 LTS (noble) | 1.1G | 10G |
+| `debian-13-server-snapfree` | Debian | 13 (trixie) | 365M | 10G |
+| `debian-12-server-snapfree` | Debian | 12 (bookworm) | 410M | 10G |
 
-**为什么默认是 root？想改回去怎么办？**
-自己开机器，省掉建用户的麻烦。想要普通用户：安装时把用户名写成 `ubuntu`，或者在安装器参数里加 `--username ubuntu`。
+单条记录字段：`id|distro|release|arch|variant|name|size|url|sha256`。镜像与对应 `.sha256` 均发布在 Release `image-latest`。
 
-**想换软件源？**
+## 镜像内容
+
+已预装：
+
+| 分组 | 内容 |
+|---|---|
+| 基础 | `systemd`、`udev`、`kmod`、`util-linux`、`e2fsprogs`、`dosfstools` |
+| 网络 | `systemd-networkd`、`systemd-resolved`、`iptables`、`iproute2`、`iputils-ping`、`curl`、`wget`、`ca-certificates`、`gnupg` |
+| 远程 | `openssh-server`、`cloud-init`（NoCloud / ConfigDrive）、`qemu-guest-agent` |
+| 引导 | GRUB（BIOS + UEFI 双启动）、`initramfs-tools` |
+| 运维 | `nano`、`vim-tiny`、`bash-completion`、`man-db`、`git`、`tmux`、`rsync`、`jq` |
+| 网络诊断 | `mtr-tiny`、`traceroute`、`bind9-dnsutils`、`whois`、`tcpdump`、`iftop`、`nmap`、`socat`、`net-tools`、`lsof`、`ethtool`、`netcat-openbsd` |
+| 观测排错 | `htop`、`sysstat`、`strace`、`ncdu`、`tree`、`file`、`bc`、`time`、`pv` |
+| 磁盘 | `parted`、`gdisk`、`pciutils` |
+| 压缩 | `zip`、`unzip`、`xz-utils`、`bzip2`、`zstd`、`pigz`、`lz4` |
+
+刻意不含：
+
+| 组件 | 说明 |
+|---|---|
+| snap / snapd | Ubuntu 镜像不带，构建期有断言阻止误入 |
+| Docker | `WITH_DOCKER=1` 构建时才装；装好可用官方脚本安装 |
+| nodejs / npm | 需自行 `apt install` 或使用 nvm |
+| nginx / apache / php / 数据库 | 构建期黑名单，误入会 purge |
+| linux-firmware | `WITH_FIRMWARE=1` 构建时才装，虚拟机无需 |
+| cron / fail2ban / ufw | 未预装，避免默认常驻服务与防火墙拦截 |
+
+`WITH_OPS=0` 可整体去掉运维工具层（约减少 70MB）。
+
+## 优化基线
+
+四套镜像使用同一份配置，逐项如下：
+
+| 类别 | 配置 |
+|---|---|
+| 拥塞控制 | `net.ipv4.tcp_congestion_control=bbr`，`default_qdisc=fq` |
+| 连接队列 | `somaxconn=4096`、`netdev_max_backlog=16384`、`tcp_max_syn_backlog=8192` |
+| 端口与复用 | `ip_local_port_range=1024 65535`、`tcp_tw_reuse=1`、`tcp_max_tw_buckets=262144` |
+| 缓冲 | `tcp_rmem`/`tcp_wmem` 上限 16MiB、`tcp_notsent_lowat=131072`、`tcp_mtu_probing=1` |
+| 内存与磁盘 | `vm.swappiness=10`、`vm.vfs_cache_pressure=50`、`dirty_ratio=20`、`dirty_background_ratio=10` |
+| 句柄与进程 | `fs.file-max=2097152`、`fs.nr_open=1048576`、`nofile 65536/524288`（`*` 与 `root`）、`nproc=65536` |
+| inotify | `max_user_watches=524288`、`max_user_instances=1024` |
+| 时间同步 | `systemd-timesyncd` + 国内 NTP，时区 `Asia/Shanghai` |
+| 后台任务 | `apt-daily`、`apt-daily-upgrade`、`motd-news` 定时器禁用并 mask |
+
+构建期断言（任一不满足即中断构建）：无 snapd 与 `/snap`；`ubuntu.sources` / `debian.sources` 存在且含 `URIs:`；`sf-firstboot.service` 与 `99-limits.conf` 存在；首启脚本可执行；`tcp_congestion_control = bbr`。
+
+## 首次启动行为
+
+`sf-firstboot.service` 为一次性单元，读取 `/etc/sf-image.conf`，依次执行：
+
+1. 设置时区并启用 `systemd-timesyncd`
+2. 调用 `sf-mirror-auto`，按出口 IP 所在地区选择软件源（国内 → 国内镜像源，其它 → 官方源），日志 `/var/log/sf-mirror.log`
+3. 按内存容量建立 swap 并写入 `/etc/fstab`：`<1G` → 2 倍内存；`1–2G` → 2G；`2–4G` → 等于内存；`4–16G` → 4G；`≥16G` → 不建；结果限制在 512M–8G 区间
+
+执行完成后写入 `/var/lib/sf-firstboot.done` 并自我禁用。
+
+## 镜像下载加速
+
+镜像下载地址按可用带宽动态选择，规则：
+
+- 国内机器：对全部候选站逐个测速，取最快者
+- 海外机器：先探测 GitHub 直连，可用则直连；不可用再测速选站
+- 全部不可用：回落 GitHub 原始地址
+
+地区判定多级兜底，命中任一即视为国内：`_loc` → `api.ip.sb/geoip` → `ipinfo.io/country` → `qualcomm cdn-cgi/trace`。
+
+候选站（顺序仅决定测速先后）：`mirror-one.losn.cc`、`mirror.drxian.qzz.io`、`v4.gh-proxy.org`、`axisnow.gh-proxy.org`。
+
+测速方式与限制：
+
+- 每站拉取 1 MB 区间（`Range: 0-1048575`），`--max-filesize 4MB` 防止不支持 Range 的站点整包传输
+- 返回码非 200/206、`content-type` 为 `text/html`、或有效数据不足 64 KB 的候选直接排除
+- 单站超时 10 秒，串行执行；选中站结果在当前安装进程内缓存
+
+规则细节见 [`installer/MIRRORS.md`](installer/MIRRORS.md)。
+
+## 更换软件源
+
+镜像内提供 `apt-mirror`：
 
 ```bash
-apt-mirror            # 看当前用的哪个源
-apt-mirror auto       # 按所在地自动选
-apt-mirror aliyun     # 也可指定：tuna / ustc / huawei / official
+apt-mirror            # 查看当前源
+apt-mirror auto       # 按出口 IP 自动选择
+apt-mirror aliyun     # 可选：tuna / ustc / huawei / official
 ```
 
-**时间不对？**
-`timedatectl status` 看看，不对就 `systemctl restart systemd-timesyncd`。
+Debian 会把安全源写成独立的 `security.debian.org/debian-security` stanza；Ubuntu 的三类 suite 共用同一 URI。
 
-**安装中途 SSH 断了？**
-正常，安装器要往磁盘写系统然后重启。等几分钟重新连。
-
-**能不能装别的系统（Arch / Alpine / CentOS）？**
-目前只做 Ubuntu 和 Debian。加新系统见 [`docs/BUILD.md`](docs/BUILD.md)。
-
-## 装完之后自检
-
-不确定装得对不对，跑这个（只检查，不改任何东西）：
+## 装机后自检
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Asunano/snapfree-os/main/tools/snapfree-check.sh | sudo bash
 ```
 
-它会查：系统版本、BBR 是否生效、swap 是否挂上、软件源是否为国内源、SSH 是否在跑、时区、各项内核参数、有没有混进 snap/docker。
+检查项：发行版与版本、BBR 与实际值、swap 挂载、软件源归属（国内/官方，识别 Ubuntu 与 Debian 两种源文件格式）、SSH 服务状态、时区、内核参数、snap/docker 残留。
 
-## 想自己做镜像 / 改配置
+## 故障排查
 
-构建方式、CI、怎么加发行版： [`docs/BUILD.md`](docs/BUILD.md)；两套构建套件的说明： [`distros/README.md`](distros/README.md)。
+| 现象 | 排查方式 |
+|---|---|
+| 安装后无法 SSH | 先在服务商 VNC 登录：`systemctl status ssh ssh.socket`；确认安装时提供过 `--password` 或 `--ssh-key` |
+| 安装后 ping 不通 | 确认机器已完成重启；`ip a` 确认 `eth0` 已获得地址；`systemctl status systemd-networkd` |
+| 确认 BBR 是否生效 | `sysctl net.ipv4.tcp_congestion_control` 应输出 `bbr` |
+| 确认 swap 是否建立 | `swapon --show`；`cat /etc/fstab` 中应有对应条目 |
+| 时间不正确 | `timedatectl status`；`systemctl restart systemd-timesyncd` |
+| 换普通用户 | 重建镜像时 `USER_NAME=ubuntu`，或安装时 `--username ubuntu` |
+| 主机名/DNS 不对 | 重装时在安装器提示处填写，或进系统后手工改（`sf-firstboot` 不回改这些项） |
 
-## 声明
+日志位置：安装器 `/trans.sh` 阶段日志在 SSH 会话中输出；首启换源日志 `/var/log/sf-mirror.log`。
 
-安装器改造自 [bin456789/reinstall](https://github.com/bin456789/reinstall)（GPL-3.0，见 `installer/LICENSE`）：菜单只选本仓库镜像，下载走测速选站，其余安装流程与上游一致。
+## 自己构建镜像
+
+```bash
+cd distros/ubuntu && bash ./build.sh              # Ubuntu 26.04（resolute）
+cd distros/ubuntu && SUITE=noble bash ./build.sh  # Ubuntu 24.04
+cd distros/debian && SUITE=trixie bash ./build.sh   # Debian 13
+cd distros/debian && SUITE=bookworm bash ./build.sh # Debian 12
+```
+
+依赖 `mmdebstrap`、`qemu-img`、`parted`、`dosfstools`、`e2fsprogs`；非 root 或缺少 mmdebstrap 时自动进入容器构建（需要 Docker）。
+
+构建流程、CI 矩阵、catalog 字段、新增发行版的注意事项见 [`docs/BUILD.md`](docs/BUILD.md)；套件参数与环境变量见 [`distros/README.md`](distros/README.md)。
+
+## 目录结构
+
+```
+catalog/catalog.tsv        镜像清单（唯一真源）
+installer/reinstall.sh     安装器（菜单、catalog 校验、下载加速）
+installer/trans.sh         上游安装核心（未修改）
+installer/MIRRORS.md       下载加速规则
+installer/LICENSE          GPL-3.0
+distros/ubuntu/            Ubuntu 26.04 / 24.04 构建套件
+distros/debian/            Debian 13 / 12 构建套件
+docs/BUILD.md              构建、CI、扩展说明
+tools/snapfree-check.sh    装机后自检脚本
+.github/workflows/         image-build（构建矩阵）/ installer-contract（契约校验）
+```
+
+## 验证状态
+
+四套镜像在 GitHub Actions 中完成构建，并以 QEMU + OVMF（TCG）实际启动，串口输出出现 cloud-init / login 后方发布至 Release。真实云厂商环境存在网卡命名、引导模式、控制台差异，首次部署建议保留服务商救援入口。
+
+## 致谢与许可
+
+安装器基于 [bin456789/reinstall](https://github.com/bin456789/reinstall) 修改，遵循 GPL-3.0，许可证见 `installer/LICENSE`。镜像构建套件、首启脚本、catalog 与菜单逻辑为本仓库新增。
