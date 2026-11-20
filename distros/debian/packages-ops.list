@@ -1,13 +1,59 @@
-# 运维工具层（默认装，WITH_OPS=0 关闭，约省 40MB）
+# ============================================================
+# 运维工具层（默认装，WITH_OPS=0 关闭，约省 70MB）
+# 只放 CLI 工具，不放任何常驻服务（没有 nginx/cron/fail2ban 这类）
+# 全部在 main 里，不依赖第三方源
+# ============================================================
+
+# ---- 编辑器 / shell 体验 ----
 git
 nano
 vim-tiny
-htop
-tmux
-rsync
-jq
-unzip
-xz-utils
-zstd
+bash-completion
+man-db
+
+# ---- 网络诊断 ----
+mtr-tiny
+traceroute
+bind9-dnsutils
+whois
+tcpdump
+iftop
+nmap
+socat
+net-tools
+lsof
 ethtool
 netcat-openbsd
+
+# ---- 系统观察 / 排错 ----
+htop
+sysstat
+strace
+ncdu
+tree
+file
+bc
+time
+pv
+
+# ---- 磁盘 / 分区（VPS 扩容后要用）----
+parted
+gdisk
+pciutils
+
+# ---- 压缩 / 传输 ----
+rsync
+zip
+unzip
+xz-utils
+bzip2
+zstd
+pigz
+lz4
+
+# ---- 小工具 ----
+tmux
+jq
+curl
+wget
+openssl
