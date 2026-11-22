@@ -8,9 +8,6 @@ on:
     # 每天 04:00 (UTC+8) 触发，实际开始随机延迟 0-30 分钟
     - cron: '0 20 * * *'
   workflow_dispatch:
-  push:
-    paths:
-      - 'tools/sync-test.flag'
 
 permissions:
   contents: write
