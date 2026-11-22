@@ -82,8 +82,8 @@ jobs:
         if: steps.sync.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          git config user.name 'snapfree-bot'
-          git config user.email 'bot@users.noreply.github.com'
+          git config user.name 'Asunano'
+          git config user.email '120234290+Asunano@users.noreply.github.com'
           printf '%s\n' "${{ steps.sync.outputs.version }}" > installer/.upstream-version
           git add installer/trans.sh installer/reinstall.sh installer/.upstream-version
           git commit -m "[sync] 上游 trans.sh 同步至 ${{ steps.sync.outputs.version }}"
@@ -133,8 +133,8 @@ jobs:
             echo '无需更新'
             exit 0
           fi
-          git config user.name 'snapfree-bot'
-          git config user.email 'bot@users.noreply.github.com'
+          git config user.name 'Asunano'
+          git config user.email '120234290+Asunano@users.noreply.github.com'
           printf '%s\n' "$NEW" > installer/.upstream-version
           git add installer/.upstream-version
           git commit -m "chore: 记录上游版本 $NEW [skip ci]"
