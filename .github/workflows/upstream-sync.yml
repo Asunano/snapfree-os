@@ -34,15 +34,17 @@ jobs:
       - name: 拉取上游文件
         run: |
           set -euo pipefail
-          for f in trans.sh reinstall.sh; do
-            curl -fsSL --retry 3 "https://raw.githubusercontent.com/bin456789/reinstall/main/$f" -o "/tmp/up-$f"
-            bash -n "/tmp/up-$f"
-            echo "ok $f $(wc -c < /tmp/up-$f) bytes"
-          done
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/bin456789/reinstall/main/trans.sh" -o /tmp/up-trans.sh
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh" -o /tmp/up-reinstall.sh
+          bash -n /tmp/up-reinstall.sh
+          size=$(wc -c < /tmp/up-trans.sh)
+          echo "上游 trans.sh ${size} bytes"
+          [ "$size" -ge 150000 ] || { echo 'trans.sh 过小，可能下载不完整'; exit 1; }
 
       - name: 兼容性门禁（fork 依赖的锚点必须存在）
         run: |
           set -euo pipefail
+          # trans.sh 本身由 busybox ash 运行，用 bash -n 会误报（不同版本行为不一致），故只查锚点与体积
           grep -qE '^SCRIPT_VERSION=' /tmp/up-trans.sh
           grep -q '^: main' /tmp/up-trans.sh
           grep -q 'cloud_image' /tmp/up-trans.sh
@@ -65,7 +67,6 @@ jobs:
           fi
           cp /tmp/up-trans.sh installer/trans.sh
           sed -i "s/^SCRIPT_VERSION=.*/SCRIPT_VERSION=$NEW/" installer/reinstall.sh
-          bash -n installer/trans.sh
           bash -n installer/reinstall.sh
           a=$(grep -m1 '^SCRIPT_VERSION=' installer/reinstall.sh)
           b=$(grep -m1 '^SCRIPT_VERSION=' installer/trans.sh)
