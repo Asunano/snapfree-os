@@ -233,6 +233,7 @@ jobs:
             echo "== 发布 $id"
             if gh release view "$id" >/dev/null 2>&1; then
               gh release upload "$id" $files --clobber
+              gh release edit "$id" --title "snapfree-os $id"
             else
               gh release create "$id" $files \
                 --target "$GITHUB_SHA" \
@@ -250,17 +251,18 @@ jobs:
           set -euo pipefail
           mapfile -t FILES < <(find dist -type f \( -name '*.qcow2' -o -name '*.sha256' \) | sort)
           [ "${#FILES[@]}" -gt 0 ] || { echo '没有可发布的产物'; exit 1; }
+          TITLE='snapfree-os 镜像汇总（ubuntu 26.04/24.04 · debian 13/12）'
           if gh release view image-latest >/dev/null 2>&1; then
             gh release upload image-latest "${FILES[@]}" --clobber
           else
             gh release create image-latest "${FILES[@]}" \
               --target "$GITHUB_SHA" \
-              --title 'snapfree-os latest' \
-              --notes '仓库内镜像的 latest 发布（由 Actions 自动发布）。'
+              --title "$TITLE" \
+              --notes '四套镜像的汇总发布，download 链接保持稳定；由 Actions 每日重建。'
           fi
-          gh release edit image-latest --latest
+          gh release edit image-latest --title "$TITLE" --latest
 
-      - name: 回写 catalog 体积
+      - name: 回写 catalog 体积与 sha256
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -268,13 +270,18 @@ jobs:
           files = {}
           for p in pathlib.Path('dist').rglob('*.qcow2'):
               files[p.name] = p.stat().st_size
+          shas = {}
+          for p in pathlib.Path('dist').rglob('*.sha256'):
+              words = p.read_text().split()
+              if words:
+                  shas[p.name[:-len('.sha256')]] = words[0]
           def human(n):
               if n >= 1024 ** 3:
                   return f"{n / 1024 ** 3:.1f}G"
               return f"{max(1, round(n / 1024 ** 2))}M"
           c = pathlib.Path('catalog/catalog.tsv')
           lines = c.read_text().splitlines()
-          out, changed = [], 0
+          out, changed, sha_changed = [], 0, 0
           for line in lines:
               if line.startswith('#') or not line.strip():
                   out.append(line); continue
@@ -283,16 +290,19 @@ jobs:
               size = files.get(name)
               if size and f[6] != human(size):
                   f[6] = human(size); changed += 1
+              sha = shas.get(name)
+              if sha and len(f) > 8 and f[8] != sha:
+                  f[8] = sha; sha_changed += 1
               out.append('|'.join(f))
           c.write_text('\n'.join(out) + '\n')
-          print(f'catalog 体积更新 {changed} 条')
+          print(f'catalog 体积更新 {changed} 条，sha256 更新 {sha_changed} 条')
           PY
           if git diff --quiet catalog/catalog.tsv; then
             echo 'catalog 无变化，跳过提交'
             exit 0
           fi
-          git config user.name 'snapfree-bot'
-          git config user.email 'bot@users.noreply.github.com'
+          git config user.name 'Asunano'
+          git config user.email '120234290+Asunano@users.noreply.github.com'
           git add catalog/catalog.tsv
-          git commit -m 'chore(catalog): 同步镜像体积 [skip ci]'
+          git commit -m 'chore(catalog): 同步镜像体积与 sha256 [skip ci]'
           git push
