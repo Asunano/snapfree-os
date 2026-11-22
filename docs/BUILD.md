@@ -136,7 +136,13 @@ cd distros/debian && SUITE=bookworm bash ./build.sh       # Debian 12
 
 发布：`publish-latest` 任务仅在 `main` 分支且 commit message 包含 `[publish]` 时执行，把四套 qcow2 与 `.sha256` 发布到 Release `image-latest`。日常提交只验证、不发布。
 
-触发条件：`push` 到 `main` 且改动命中 `distros/**` 或本 workflow 文件；`workflow_dispatch`；每月 1 日 18:00（UTC，即北京时间 2 日 02:00）定时重建。
+触发条件：`push` 到 `main` 且改动命中 `distros/**` 或本 workflow 文件；`workflow_dispatch`；每日 `0 17 * * *`（UTC，即北京时间 01:00）定时重建。
+
+定时触发时 `gate` 任务会先随机 `sleep 0–3600` 秒，使每日开始时间不固定（上限一小时，避免所有用户与上游同时拉取官方源）。`gate` 只在上报定时事件时延迟，`push` / `workflow_dispatch` 直接开始。
+
+发布条件：`main` 分支且（`schedule` 或 `workflow_dispatch` 或 commit message 含 `[publish]`）。发布时按 artifact 目录名拆出镜像 id，为每个 id 创建一个同名 tag 的 Release（`--latest=false`），随后把所有产物汇总写入 `image-latest` 并将其设为 latest，保证 `releases/latest/download/<file>` 旧链接不变。
+
+发布完成后会按实际产物字节数回写 `catalog/catalog.tsv` 的 `size` 字段并以 `chore(catalog): 同步镜像体积 [skip ci]` 提交；`GITHUB_TOKEN` 提交不会再触发其他 workflow。
 
 ### installer-contract
 
@@ -154,6 +160,19 @@ cd distros/debian && SUITE=bookworm bash ./build.sh       # Debian 12
 
 > [!NOTE]
 > 本仓库的批量修改通过一次性 workflow 内的脚本完成，这些提交由 `GITHUB_TOKEN` 发起，不会触发其他 workflow。修改 `installer/**` 后需要一次真实 push 才会让契约测试重跑。
+
+### upstream-sync
+
+`.github/workflows/upstream-sync.yml` 每日同步上游安装核心，`workflow_dispatch` 可手动跑：
+
+1. 拉取上游 `trans.sh`、`reinstall.sh`，两者先过 `bash -n`
+2. 兼容性门禁：上游 `trans.sh` 必须有 `^SCRIPT_VERSION=`、`^: main`、`cloud_image`；本地 `reinstall.sh` 必须有向 `trans.sh` 注入的锚点语句
+3. `trans.sh` sha256 变化时覆盖本地文件，并把 `reinstall.sh` 的 `SCRIPT_VERSION` 改成与上游一致（重装时 `reinstall.sh` 会校验下载到的 `trans.sh` 版本号，两者必须相等），再提交 `[sync] ...`
+4. 上游版本号变化时开 issue `上游 reinstall.sh 变更待评估：<version>`，说明不能自动合并的原因与人工步骤；已存在同名 issue 则跳过
+5. `installer/.upstream-version` 记录已处理的上游版本，避免重复开 issue
+
+> [!IMPORTANT]
+> 只自动同步 `trans.sh`。`reinstall.sh` 含 catalog 菜单、下载加速、`setos_*` 校验等魔改，自动合并会冲突或覆盖这些逻辑，只能按 issue 人工搬。
 
 ## 清单字段
 

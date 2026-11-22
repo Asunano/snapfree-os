@@ -23,6 +23,7 @@
 - [获取安装器](#获取安装器)
 - [交互安装](#交互安装)
 - [非交互安装与参数](#非交互安装与参数)
+- [自动更新与发布](#自动更新与发布)
 - [镜像清单](#镜像清单)
 - [镜像内容](#镜像内容)
 - [优化基线](#优化基线)
@@ -114,6 +115,26 @@ bash reinstall.sh ubuntu 24.04 --ssh-key 'ssh-ed25519 AAAA... user@host'
 
 > [!NOTE]
 > 通过 `--img` 指定的链接不参与镜像加速改写，直连原始地址。
+
+## 自动更新与发布
+
+| 对象 | 频率 | 行为 |
+|---|---|---|
+| 镜像 | 每天 01:00 后随机开始（随机延迟 0–60 分钟） | 从官方源重建四套镜像 → 冒烟启动 → 发布 |
+| 安装核心 `trans.sh` | 每天 04:00 后随机开始 | 拉取上游同名文件，锚点兼容性校验通过后覆盖并提交 |
+| 魔改安装器 `reinstall.sh` | 仅提醒 | 上游有变更时开 issue，不自动合并 |
+
+发布标签：每套镜像一个独立 tag（当前为 `ubuntu-26.04`、`ubuntu-24.04`、`debian-13`、`debian-12`），另有一个汇总 tag `image-latest`，内含全部镜像。
+
+```text
+https://github.com/Asunano/snapfree-os/releases/download/ubuntu-26.04/ubuntu-26.04-server-snapfree-amd64.qcow2
+https://github.com/Asunano/snapfree-os/releases/download/debian-13/debian-13-server-snapfree-amd64.qcow2
+https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2   # 汇总，兼容旧链接
+```
+
+`catalog/catalog.tsv` 中的 `size` 会在发布后自动回写，`url` 保持指向 `image-latest`，所以旧链接不会失效。
+
+手动发布：在 Actions 里手动跑 `image-build` 会直接发布；或推入 commit 并在 message 里带 `[publish]`。
 
 ## 镜像清单
 
