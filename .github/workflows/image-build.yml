@@ -12,7 +12,8 @@ on:
       - '.github/workflows/image-build.yml'
     tags: ['v*']
   schedule:
-    - cron: '0 18 1 * *'
+    # 每天 01:00 (UTC+8) 触发；实际开始由 gate 任务随机延迟 0-60 分钟
+    - cron: '0 17 * * *'
 
 permissions:
   contents: write
@@ -22,7 +23,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 随机延迟（仅定时触发）
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          d=$((RANDOM % 3600))
+          echo "定时触发，随机延迟 ${d}s 后开始重建"
+          sleep "$d"
+
   build:
+    needs: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -191,21 +204,50 @@ jobs:
 
   publish-latest:
     needs: [build, smoke]
-    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish]')
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       contains(github.event.head_commit.message, '[publish]'))
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v5
+
       - name: 取全部 qcow2
         uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: 写入到 image-latest Release
+      - name: 按镜像独立 tag 发布
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           find dist -type f | sort
+          for d in dist/*/; do
+            id=$(basename "$d" | sed -E 's/^qcow2-//; s/-[0-9]+$//')
+            [ -n "$id" ] || continue
+            files=$(find "$d" -maxdepth 1 -type f \( -name '*.qcow2' -o -name '*.sha256' \) | sort)
+            [ -n "$files" ] || { echo "跳过 $id（无产物）"; continue; }
+            echo "== 发布 $id"
+            if gh release view "$id" >/dev/null 2>&1; then
+              gh release upload "$id" $files --clobber
+            else
+              gh release create "$id" $files \
+                --target "$GITHUB_SHA" \
+                --title "snapfree-os $id" \
+                --notes "$id 的自动构建镜像（每日重建）。产物与 image-latest 中同名文件一致。" \
+                --latest=false
+            fi
+          done
+
+      - name: 汇总发布到 image-latest（保持旧链接可用）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
           mapfile -t FILES < <(find dist -type f \( -name '*.qcow2' -o -name '*.sha256' \) | sort)
           [ "${#FILES[@]}" -gt 0 ] || { echo '没有可发布的产物'; exit 1; }
           if gh release view image-latest >/dev/null 2>&1; then
@@ -217,3 +259,40 @@ jobs:
               --notes '仓库内镜像的 latest 发布（由 Actions 自动发布）。'
           fi
           gh release edit image-latest --latest
+
+      - name: 回写 catalog 体积
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          files = {}
+          for p in pathlib.Path('dist').rglob('*.qcow2'):
+              files[p.name] = p.stat().st_size
+          def human(n):
+              if n >= 1024 ** 3:
+                  return f"{n / 1024 ** 3:.1f}G"
+              return f"{max(1, round(n / 1024 ** 2))}M"
+          c = pathlib.Path('catalog/catalog.tsv')
+          lines = c.read_text().splitlines()
+          out, changed = [], 0
+          for line in lines:
+              if line.startswith('#') or not line.strip():
+                  out.append(line); continue
+              f = line.split('|')
+              name = f[7].rsplit('/', 1)[-1]
+              size = files.get(name)
+              if size and f[6] != human(size):
+                  f[6] = human(size); changed += 1
+              out.append('|'.join(f))
+          c.write_text('\n'.join(out) + '\n')
+          print(f'catalog 体积更新 {changed} 条')
+          PY
+          if git diff --quiet catalog/catalog.tsv; then
+            echo 'catalog 无变化，跳过提交'
+            exit 0
+          fi
+          git config user.name 'snapfree-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add catalog/catalog.tsv
+          git commit -m 'chore(catalog): 同步镜像体积 [skip ci]'
+          git push
