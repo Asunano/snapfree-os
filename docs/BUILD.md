@@ -165,7 +165,7 @@ cd distros/debian && SUITE=bookworm bash ./build.sh       # Debian 12
 
 `.github/workflows/upstream-sync.yml` 每日同步上游安装核心，`workflow_dispatch` 可手动跑：
 
-1. 拉取上游 `trans.sh`、`reinstall.sh`，两者先过 `bash -n`
+1. 拉取上游 `trans.sh`、`reinstall.sh`：`reinstall.sh` 过 `bash -n`，`trans.sh` 只查体积与锚点（它由 busybox ash 运行，用 bash/sh 做语法检查会误报）
 2. 兼容性门禁：上游 `trans.sh` 必须有 `^SCRIPT_VERSION=`、`^: main`、`cloud_image`；本地 `reinstall.sh` 必须有向 `trans.sh` 注入的锚点语句
 3. `trans.sh` sha256 变化时覆盖本地文件，并把 `reinstall.sh` 的 `SCRIPT_VERSION` 改成与上游一致（重装时 `reinstall.sh` 会校验下载到的 `trans.sh` 版本号，两者必须相等），再提交 `[sync] ...`
 4. 上游版本号变化时开 issue `上游 reinstall.sh 变更待评估：<version>`，说明不能自动合并的原因与人工步骤；已存在同名 issue 则跳过
