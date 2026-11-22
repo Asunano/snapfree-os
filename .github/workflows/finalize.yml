@@ -1,0 +1,57 @@
+name: finalize
+on:
+  push:
+    paths: ['tools/fin.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: 统一 image-latest 标题
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release edit image-latest \
+            --title 'snapfree-os 镜像汇总（ubuntu 26.04/24.04 · debian 13/12）' \
+            --notes '四套镜像的汇总发布，download 链接保持稳定；由 Actions 每日重建。' \
+            || echo '标题更新跳过（release 不存在或无权限）'
+          gh release view image-latest --json name,isLatest --jq '.name, .isLatest'
+
+      - name: 重写全部提交的作者/提交者
+        run: |
+          set -euo pipefail
+          git config user.name 'Asunano'
+          git config user.email '120234290+Asunano@users.noreply.github.com'
+          git checkout -B main
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --env-filter '
+            export GIT_AUTHOR_NAME="Asunano"
+            export GIT_AUTHOR_EMAIL="120234290+Asunano@users.noreply.github.com"
+            export GIT_COMMITTER_NAME="Asunano"
+            export GIT_COMMITTER_EMAIL="120234290+Asunano@users.noreply.github.com"
+          ' -- --branches
+          echo '--- 重写后身份统计'
+          git log --format='%an <%ae> | %cn <%ce>' | sort -u
+          echo '--- 提交数'
+          git rev-list --count main
+          git push --force origin main
+
+      - name: 清理一次性工具
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/finalize.yml tools/fin.flag
+          git commit -m 'chore: 清理一次性历史重写工具'
+          git push
