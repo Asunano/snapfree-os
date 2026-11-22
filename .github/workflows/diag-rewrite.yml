@@ -1,0 +1,36 @@
+name: diag-rewrite
+on:
+  push:
+    paths: ['tools/diag.flag']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: 重写身份并尝试推送
+        run: |
+          set -uo pipefail
+          git config user.name 'Asunano'
+          git config user.email '120234290+Asunano@users.noreply.github.com'
+          git checkout -B main
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --env-filter '
+            export GIT_AUTHOR_NAME="Asunano"
+            export GIT_AUTHOR_EMAIL="120234290+Asunano@users.noreply.github.com"
+            export GIT_COMMITTER_NAME="Asunano"
+            export GIT_COMMITTER_EMAIL="120234290+Asunano@users.noreply.github.com"
+          ' -- --branches 2>&1 | tail -5
+          echo "filter_rc=${PIPESTATUS[0]}"
+          echo '--- 身份统计'
+          git log --format='%an <%ae> | %cn <%ce>' | sort -u
+          echo '--- 尝试推送到临时分支'
+          OUT=$(git push --force origin main:refs/heads/rewrite-test 2>&1); RC=$?
+          echo "push_rc=$RC"
+          echo "$OUT" | tail -20
