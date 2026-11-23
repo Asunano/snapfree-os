@@ -1,13 +1,15 @@
 # upstream-sync：每日同步上游 bin456789/reinstall 的 trans.sh
-# trans.sh 是本仓库未曾修改的上游安装核心，可直接跟随；
-# reinstall.sh 经过大量魔改（菜单/catalog/加速），不自动合并，只开 issue 提醒。
+# 检测两条线：trans.sh 内容 sha（可直接覆盖）、上游 reinstall.sh 的 sha（只提醒、不合并）
+# 注意：上游不一定会为每次改动 bump SCRIPT_VERSION，所以版本号不能当作唯一依据。
 name: upstream-sync
 
 on:
   schedule:
-    # 每天 04:00 (UTC+8) 触发，实际开始随机延迟 0-30 分钟
+    # 每天 04:00 (UTC+8) 触发，随机延迟 0-5 分钟
     - cron: '0 20 * * *'
   workflow_dispatch:
+  push:
+    paths: ['tools/us2.flag']
 
 permissions:
   contents: write
@@ -20,31 +22,44 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: 随机延迟（仅定时触发）
         if: github.event_name == 'schedule'
-        run: sleep $((RANDOM % 1800))
+        run: |
+          set -euo pipefail
+          d=$((RANDOM % 300))
+          echo "随机延迟 ${d}s"
+          sleep "$d"
 
       - uses: actions/checkout@v5
 
-      - name: 记录同步前的上游版本
+      - name: 读取本地基线
         id: before
-        run: echo "last=$(cat installer/.upstream-version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          echo "version=$(cat installer/.upstream-version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
+          echo "reinstall=$(cat installer/.upstream-reinstall-sha 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
 
       - name: 拉取上游文件
+        id: up
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 "https://raw.githubusercontent.com/bin456789/reinstall/main/trans.sh" -o /tmp/up-trans.sh
           curl -fsSL --retry 3 "https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh" -o /tmp/up-reinstall.sh
           bash -n /tmp/up-reinstall.sh
           size=$(wc -c < /tmp/up-trans.sh)
-          echo "上游 trans.sh ${size} bytes"
           [ "$size" -ge 150000 ] || { echo 'trans.sh 过小，可能下载不完整'; exit 1; }
+          VER=$(grep -m1 '^SCRIPT_VERSION=' /tmp/up-trans.sh | cut -d= -f2)
+          RE=$(sha256sum /tmp/up-reinstall.sh | cut -d' ' -f1)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "reinstall=$RE" >> "$GITHUB_OUTPUT"
+          echo "上游：trans.sh ${size}B 版本 ${VER}；reinstall.sh ${RE:0:12}"
 
       - name: 兼容性门禁（fork 依赖的锚点必须存在）
         run: |
           set -euo pipefail
-          # trans.sh 本身由 busybox ash 运行，用 bash -n 会误报（不同版本行为不一致），故只查锚点与体积
+          # trans.sh 由 busybox ash 运行，bash -n 会误报，只查锚点与体积
           grep -qE '^SCRIPT_VERSION=' /tmp/up-trans.sh
           grep -q '^: main' /tmp/up-trans.sh
           grep -q 'cloud_image' /tmp/up-trans.sh
@@ -53,20 +68,20 @@ jobs:
 
       - name: 同步 trans.sh
         id: sync
+        env:
+          VER: ${{ steps.up.outputs.version }}
         run: |
           set -euo pipefail
-          NEW=$(grep -m1 '^SCRIPT_VERSION=' /tmp/up-trans.sh | cut -d= -f2)
           OLD_SHA=$(sha256sum installer/trans.sh | cut -d' ' -f1)
           NEW_SHA=$(sha256sum /tmp/up-trans.sh | cut -d' ' -f1)
-          echo "上游版本 $NEW | 本地 ${OLD_SHA:0:12} | 上游 ${NEW_SHA:0:12}"
-          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "trans.sh 本地 ${OLD_SHA:0:12} / 上游 ${NEW_SHA:0:12}"
           if [ "$OLD_SHA" = "$NEW_SHA" ]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
             echo 'trans.sh 无变化'
             exit 0
           fi
           cp /tmp/up-trans.sh installer/trans.sh
-          sed -i "s/^SCRIPT_VERSION=.*/SCRIPT_VERSION=$NEW/" installer/reinstall.sh
+          sed -i "s/^SCRIPT_VERSION=.*/SCRIPT_VERSION=$VER/" installer/reinstall.sh
           bash -n installer/reinstall.sh
           a=$(grep -m1 '^SCRIPT_VERSION=' installer/reinstall.sh)
           b=$(grep -m1 '^SCRIPT_VERSION=' installer/trans.sh)
@@ -76,66 +91,91 @@ jobs:
             exit 1
           fi
           echo 'changed=true' >> "$GITHUB_OUTPUT"
-          echo "已更新到 $NEW"
+          echo "trans.sh 已更新到 $VER"
 
-      - name: 提交同步结果
-        if: steps.sync.outputs.changed == 'true'
+      - name: 提交同步结果与基线
+        env:
+          VER: ${{ steps.up.outputs.version }}
+          RE: ${{ steps.up.outputs.reinstall }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
         run: |
           set -euo pipefail
           git config user.name 'Asunano'
           git config user.email '120234290+Asunano@users.noreply.github.com'
-          printf '%s\n' "${{ steps.sync.outputs.version }}" > installer/.upstream-version
-          git add installer/trans.sh installer/reinstall.sh installer/.upstream-version
-          git commit -m "[sync] 上游 trans.sh 同步至 ${{ steps.sync.outputs.version }}"
+          printf '%s\n' "$VER" > installer/.upstream-version
+          printf '%s\n' "$RE" > installer/.upstream-reinstall-sha
+          git add installer/.upstream-version installer/.upstream-reinstall-sha
+          if [ "$CHANGED" = 'true' ]; then
+            git add installer/trans.sh installer/reinstall.sh
+          fi
+          if git diff --cached --quiet; then
+            echo '基线与上游一致，无提交'
+            exit 0
+          fi
+          if [ "$CHANGED" = 'true' ]; then
+            git commit -m "[sync] 上游 trans.sh 同步至 $VER"
+          else
+            git commit -m 'chore: 记录上游基线 [skip ci]'
+          fi
           git push
 
-      - name: 上游 reinstall.sh 有变更则开 issue（不自动合并）
+      - name: 上游有变化则开 issue（reinstall.sh 不自动合并）
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          NEW_VER: ${{ steps.up.outputs.version }}
+          NEW_RE: ${{ steps.up.outputs.reinstall }}
+          LAST_VER: ${{ steps.before.outputs.version }}
+          LAST_RE: ${{ steps.before.outputs.reinstall }}
         run: |
           set -euo pipefail
-          NEW=$(grep -m1 '^SCRIPT_VERSION=' /tmp/up-trans.sh | cut -d= -f2)
-          LAST="${{ steps.before.outputs.last }}"
-          if [ "$NEW" = "$LAST" ]; then
-            echo "上游版本未变（$NEW），不建 issue"
+          VER_CHANGED=false
+          RE_CHANGED=false
+          [ "$NEW_VER" = "$LAST_VER" ] || VER_CHANGED=true
+          [ "$NEW_RE" = "$LAST_RE" ] || RE_CHANGED=true
+          if [ "$VER_CHANGED" = false ] && [ "$RE_CHANGED" = false ]; then
+            echo '上游无变化（版本号与 reinstall.sh sha 均一致），不建 issue'
             exit 0
           fi
-          TITLE="上游 reinstall.sh 变更待评估：$NEW"
-          if gh issue list --state open --search "$TITLE in:title" --json title --jq '.[].title' | grep -qx "$TITLE"; then
-            echo 'issue 已存在，跳过'
+          TITLE="上游变更待评估：${NEW_VER} / reinstall.sh ${NEW_RE:0:8}"
+          if gh issue list --state open --search "上游变更待评估 in:title" --json title --jq '.[].title' | grep -q .; then
+            echo '已有未关闭的待评估 issue，跳过'
             exit 0
           fi
           {
-            echo "上游 bin456789/reinstall 已发布 **$NEW**（本地记录：$LAST）。"
+            echo "上游 bin456789/reinstall 有变化（本地基线：版本 ${LAST_VER}，reinstall.sh ${LAST_RE:0:8}）。"
             echo
-            echo '本仓库已自动同步 `trans.sh`，但 `reinstall.sh` 经过魔改（catalog 菜单、下载加速、setos_* 校验），**不会自动合并**。'
+            echo '| 项目 | 本地基线 | 上游当前 |'
+            echo '|---|---|---|'
+            echo "| SCRIPT_VERSION | ${LAST_VER} | ${NEW_VER} |"
+            echo "| reinstall.sh sha256 | ${LAST_RE:0:12} | ${NEW_RE:0:12} |"
             echo
-            echo '需要人工处理的事项：'
-            echo '1. 对比上游 reinstall.sh 与本地导入部分，判断是否有影响安装流程的修复；'
-            echo '2. 若上游修了引导/分区/网络相关逻辑，按功能搬进本地对应函数；'
-            echo '3. 搬完后跑 `installer-contract`，并手动触发一次重装验证；'
-            echo '4. 若暂不跟进，保持 `installer/.upstream-version` 不变即可（下次不会再重复提醒同一版本）。'
+            echo '本仓库已自动同步 `trans.sh`（若 sha 不同），但 `reinstall.sh` 经过魔改（catalog 菜单、下载加速、setos_* 校验），**不会自动合并**。'
             echo
-            echo '上游：https://github.com/bin456789/reinstall/commits/main'
+            echo '需要人工处理：'
+            echo '1. 看上游改了什么：https://github.com/bin456789/reinstall/commits/main'
+            echo '2. 若涉及引导/分区/网络，按功能搬进本地对应函数，而不是整体覆盖；'
+            echo '3. 搬完跑 `installer-contract`，并手动重装验证一次；'
+            echo '4. 确认无需跟进就关闭本 issue，基线已在本次运行中前进，不会重复提醒。'
           } > /tmp/issue.md
           gh issue create --title "$TITLE" --body-file /tmp/issue.md
 
-      - name: 更新本地版本记录（仅当本次未提交时）
-        if: steps.sync.outputs.changed != 'true'
+      - name: 结果摘要
+        if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VER: ${{ steps.up.outputs.version }}
+          NEW_RE: ${{ steps.up.outputs.reinstall }}
+          LAST_VER: ${{ steps.before.outputs.version }}
+          LAST_RE: ${{ steps.before.outputs.reinstall }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
         run: |
-          set -euo pipefail
-          NEW="${{ steps.sync.outputs.version }}"
-          CUR=$(cat installer/.upstream-version 2>/dev/null || echo none)
-          if [ "$NEW" = "$CUR" ]; then
-            echo '无需更新'
-            exit 0
-          fi
-          git config user.name 'Asunano'
-          git config user.email '120234290+Asunano@users.noreply.github.com'
-          printf '%s\n' "$NEW" > installer/.upstream-version
-          git add installer/.upstream-version
-          git commit -m "chore: 记录上游版本 $NEW [skip ci]"
-          git push
+          {
+            echo '### upstream-sync 结果'
+            echo
+            echo '| 项目 | 本地基线 | 上游当前 | 结论 |'
+            echo '|---|---|---|---|'
+            if [ "$CHANGED" = 'true' ]; then v='已同步'; else v='无变化'; fi
+            echo "| SCRIPT_VERSION | ${LAST_VER} | ${NEW_VER} | $v |"
+            if [ "$NEW_RE" = "$LAST_RE" ]; then r='无变化'; else r='有变化，需评估'; fi
+            echo "| reinstall.sh sha256 | ${LAST_RE:0:12} | ${NEW_RE:0:12} | $r |"
+          } >> "$GITHUB_STEP_SUMMARY"
