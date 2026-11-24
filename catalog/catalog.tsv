@@ -1,6 +1,6 @@
 # 镜像清单（唯一真源）：菜单/安装器只认这里的条目
 # 字段：id|distro|release|arch|variant|name|size|url|sha256
-ubuntu-26.04-server-snapfree|ubuntu|26.04|x86_64|server|Ubuntu 26.04 LTS 无 snap 服务器镜像|1.2G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-26.04-server-snapfree-amd64.qcow2|560152a0ca1232b95d89ffa37ada50bc4ad6334525f6f5c04591dfc00e2af289
-ubuntu-24.04-server-snapfree|ubuntu|24.04|x86_64|server|Ubuntu 24.04 LTS 无 snap 服务器镜像|1.1G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-24.04-server-snapfree-amd64.qcow2|998097aef7c5a0d33140483817d92653ac22195cf5fb5957bac099d67ec0da66
-debian-13-server-snapfree|debian|13|x86_64|server|Debian 13 (trixie) 纯净服务器镜像|365M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2|ccc48cc61c5b9cc81fcafae220212e894dc0fdad4d9ddc000fd3c1a22b81581a
-debian-12-server-snapfree|debian|12|x86_64|server|Debian 12 (bookworm) 纯净服务器镜像|409M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-12-server-snapfree-amd64.qcow2|c84d8a6c787d294a907b861f158aedfbb7e409373b6d44cd8f0c9e1adbe82356
+ubuntu-26.04-server-snapfree|ubuntu|26.04|x86_64|server|Ubuntu 26.04 LTS 无 snap 服务器镜像|1.2G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-26.04-server-snapfree-amd64.qcow2|138c5dc83d762092de4e952b6bb9ba4e9d7e46974bf47d53c5e912b87124e9ac
+ubuntu-24.04-server-snapfree|ubuntu|24.04|x86_64|server|Ubuntu 24.04 LTS 无 snap 服务器镜像|1.1G|https://github.com/Asunano/snapfree-os/releases/latest/download/ubuntu-24.04-server-snapfree-amd64.qcow2|21c6657898a382fea4d51683e619ff1b13ac8b7516e09b616324263e20afa580
+debian-13-server-snapfree|debian|13|x86_64|server|Debian 13 (trixie) 纯净服务器镜像|365M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-13-server-snapfree-amd64.qcow2|ebd1575b2f2a07b394bfc07bf3f1aeee2e8cd9bf27dfc22cd6c52a9dc9a119f6
+debian-12-server-snapfree|debian|12|x86_64|server|Debian 12 (bookworm) 纯净服务器镜像|409M|https://github.com/Asunano/snapfree-os/releases/latest/download/debian-12-server-snapfree-amd64.qcow2|134610d4042c2b6e312bd023906bf03ab1c1e4fce6ebffd487bf5c381d54b8b4
